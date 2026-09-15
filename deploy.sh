@@ -12,5 +12,5 @@ venv/bin/pip install -q -r requirements.txt
 # un service qui les casse.
 venv/bin/python -m pytest -q
 
-sudo systemctl restart magic-edh-back
+sudo systemctl restart mtg-back
 echo "✓ Back déployé"

@@ -36,7 +36,7 @@ La base vit sur `lxc-pg18` (192.168.1.104, PostgreSQL 18.6) :
 PG_HOST=192.168.1.104
 PG_DATABASE=magic_edh
 CARD_IMAGES_DIR=/srv/mtg-cards
-CORS_ORIGINS=https://magic-edh.julien-cloud.eu
+CORS_ORIGINS=https://mtg-edh.julien-cloud.eu
 ```
 
 ## Schéma et données
@@ -59,8 +59,8 @@ cards_cheapest`, et tout `ALTER TABLE cards ADD COLUMN` impose de rejouer
 ## Service
 
 ```bash
-sudo cp deploy/magic-edh-back.service /etc/systemd/system/
-sudo systemctl daemon-reload && sudo systemctl enable --now magic-edh-back
+sudo cp deploy/mtg-back.service /etc/systemd/system/
+sudo systemctl daemon-reload && sudo systemctl enable --now mtg-back
 curl -s localhost:8000/health
 ```
 

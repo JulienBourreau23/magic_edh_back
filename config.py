@@ -18,7 +18,7 @@ CARD_IMAGES_DIR = os.environ.get("CARD_IMAGES_DIR", "/srv/mtg-cards")
 
 CORS_ORIGINS = os.environ.get(
     "CORS_ORIGINS",
-    "https://magic-edh.julien-cloud.eu,http://localhost:3000",
+    "https://mtg-edh.julien-cloud.eu,http://localhost:3000",
 ).split(",")
 
 # Application personnelle : un seul compte, pas d'inscription, pas de table
