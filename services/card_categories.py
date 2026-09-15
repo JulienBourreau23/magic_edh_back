@@ -51,7 +51,14 @@ _RULES: list[tuple[str, re.Pattern]] = [
         r"|don't untap", re.I)),
 ]
 
-_LAND_RAMP_RE = re.compile(r"search your library for .*\bland", re.I)
+# Une carte qui va chercher un terrain le nomme de deux façons : par le mot
+# « land » (Cultivate : « two basic land cards ») ou par un type de base
+# (Nature's Lore : « a Forest card »). Ne connaître que la première faisait de
+# la fixation de mana un tuteur, et privait de `ramp` tout ce qui cherche par
+# type — les deux erreurs à la fois, sur la même famille de cartes.
+_BASIC_LAND_TYPES = "Plains|Island|Swamp|Mountain|Forest"
+_LAND_SEARCH_RE = re.compile(
+    rf"search your library for .*\b(lands?|{_BASIC_LAND_TYPES})\b", re.I)
 
 
 def classify(type_line: str | None, oracle_text: str | None, produced_mana: list[str] | None) -> list[str]:
@@ -65,17 +72,21 @@ def classify(type_line: str | None, oracle_text: str | None, produced_mana: list
         categories.add(LAND)
 
     # Accélération de mana : tout ce qui produit du mana sans être un terrain
-    # (rochers, dorks), plus les sorts qui vont chercher un terrain.
-    if (produced_mana and not is_land) or _LAND_RAMP_RE.search(text):
+    # (rochers, dorks), plus les sorts qui vont chercher un terrain. Un terrain
+    # qui en cherche un autre en se sacrifiant (fetchland, Terminal Moraine)
+    # n'accélère rien : il remplace la pose du tour au lieu de s'y ajouter.
+    if not is_land and (produced_mana or _LAND_SEARCH_RE.search(text)):
         categories.add(RAMP)
 
     for category, pattern in _RULES:
         if pattern.search(text):
             categories.add(category)
 
-    # Un tuteur à terrain est déjà compté comme ramp : le compter aussi comme
-    # tuteur gonflerait artificiellement le signal "tuteur" du bracket.
-    if TUTOR in categories and RAMP in categories and _LAND_RAMP_RE.search(text):
+    # Chercher un terrain n'est pas tutoriser : le signal "tuteur" du bracket
+    # doit compter les cartes qui vont chercher une réponse ou une pièce de
+    # combo, pas la manabase. La condition ne regarde donc plus `ramp` — un
+    # fetchland ne l'a pas, et restait compté comme tuteur.
+    if TUTOR in categories and _LAND_SEARCH_RE.search(text):
         categories.discard(TUTOR)
 
     return sorted(categories)

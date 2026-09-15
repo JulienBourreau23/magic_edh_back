@@ -21,7 +21,7 @@ git clone https://github.com/JulienBourreau23/magic_edh_back.git /opt/mtg-back/m
 cd /opt/mtg-back/magic_edh_back
 python3 -m venv venv
 venv/bin/pip install -r requirements.txt
-venv/bin/python -m pytest -q          # 55 tests doivent passer
+venv/bin/python -m pytest -q          # 60 tests doivent passer
 ```
 
 ## `.env`
@@ -61,6 +61,15 @@ donc le LXC back est autorisé d'office.
 venv/bin/python scripts/sync_scryfall.py       # ~99 500 cartes
 venv/bin/python scripts/sync_french_names.py   # ~30 000 alias, bulk de 393 Mo
 venv/bin/python scripts/sync_edhrec.py
+```
+
+Après une correction d'une règle de `services/card_categories.py`, les
+catégories déjà en base gardent l'ancien verdict : les rejouer sans
+retélécharger le bulk data (le script rafraîchit la vue lui-même).
+
+```bash
+venv/bin/python scripts/backfill_categories.py --dry-run   # montre le delta
+venv/bin/python scripts/backfill_categories.py
 ```
 
 `sync_french_names.py` écrit ~400 Mo dans un fichier temporaire. `/tmp` étant un
