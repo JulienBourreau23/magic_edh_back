@@ -7,6 +7,7 @@ import re
 from dataclasses import dataclass
 
 import db.cards as cards_db
+import db.collection as collection_db
 import db.decks as decks_db
 
 SECTION_HEADERS = {
@@ -143,7 +144,34 @@ def resolve_lines(parsed_lines: list[ParsedLine]) -> tuple[dict[str, dict], list
     return resolved, issues
 
 
-def import_decklist(deck_name: str, raw_text: str, format: str = "commander") -> dict:
+def is_basic_land(card: dict) -> bool:
+    return bool(card.get("type_line")) and card["type_line"].startswith("Basic Land")
+
+
+def collection_entries(parsed_lines: list, resolved: dict) -> tuple[list[tuple[str, str, int]], int]:
+    """
+    Agrège des lignes résolues pour la collection, indexée par `oracle_id` :
+    posséder « un Sol Ring » ne dépend pas de l'édition. Renvoie
+    (entrées, terrains de base ignorés) — ces derniers sont supposés
+    disponibles sans limite et ne génèrent jamais d'achat.
+    """
+    aggregated: dict[str, tuple[str, int]] = {}
+    skipped_basics = 0
+    for line in parsed_lines:
+        card = resolved.get(line.name)
+        if not card:
+            continue
+        if is_basic_land(card):
+            skipped_basics += line.quantity
+            continue
+        oracle_id = str(card["oracle_id"])
+        scryfall_id, quantity = aggregated.get(oracle_id, (card["scryfall_id"], 0))
+        aggregated[oracle_id] = (scryfall_id, quantity + line.quantity)
+    return [(oid, sid, qty) for oid, (sid, qty) in aggregated.items()], skipped_basics
+
+
+def import_decklist(deck_name: str, raw_text: str, format: str = "commander",
+                    add_to_collection: bool = False) -> dict:
     parsed_lines, issues = parse_decklist(raw_text)
     resolved, resolution_issues = resolve_lines(parsed_lines)
     issues += resolution_issues
@@ -172,8 +200,22 @@ def import_decklist(deck_name: str, raw_text: str, format: str = "commander") ->
     if commanders:
         decks_db.set_commanders(deck_id, commanders[0], commanders[1] if len(commanders) > 1 else None)
 
+    # Un deck déjà monté contient physiquement ses exemplaires : les inscrire
+    # dans la collection évite qu'on conseille d'acheter ce qui est déjà dans
+    # la boîte. Opt-in, parce qu'un deck seulement envisagé ne prouve rien.
+    collection_summary = None
+    if add_to_collection:
+        entries, skipped_basics = collection_entries(parsed_lines, resolved)
+        collection_db.add(entries)
+        collection_summary = {
+            "added_distinct": len(entries),
+            "added_total": sum(quantity for _, _, quantity in entries),
+            "skipped_basic_lands": skipped_basics,
+        }
+
     return {
         "deck_id": deck_id,
         "commander_resolved": bool(commanders),
         "import_issues": decks_db.get_import_issues(deck_id),
+        "collection": collection_summary,
     }

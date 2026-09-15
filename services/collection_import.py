@@ -6,11 +6,12 @@ seule la destination change. Les terrains de base sont ignorés — ils sont
 considérés comme disponibles sans limite et ne génèrent jamais d'achat.
 """
 import db.collection as collection_db
-from services.decklist_parser import parse_decklist, resolve_lines
-
-
-def is_basic_land(card: dict) -> bool:
-    return bool(card.get("type_line")) and card["type_line"].startswith("Basic Land")
+from services.decklist_parser import (
+    collection_entries,
+    is_basic_land,  # noqa: F401 — ré-exporté, routers/collection.py l'importe d'ici
+    parse_decklist,
+    resolve_lines,
+)
 
 
 def import_collection(raw_text: str) -> dict:
@@ -18,24 +19,12 @@ def import_collection(raw_text: str) -> dict:
     resolved, resolution_issues = resolve_lines(parsed_lines)
     issues += resolution_issues
 
-    aggregated: dict[str, tuple[str, int]] = {}
-    skipped_basics = 0
-    for line in parsed_lines:
-        card = resolved.get(line.name)
-        if not card:
-            continue
-        if is_basic_land(card):
-            skipped_basics += line.quantity
-            continue
-        oracle_id = str(card["oracle_id"])
-        scryfall_id, quantity = aggregated.get(oracle_id, (card["scryfall_id"], 0))
-        aggregated[oracle_id] = (scryfall_id, quantity + line.quantity)
-
-    collection_db.add([(oracle_id, sid, qty) for oracle_id, (sid, qty) in aggregated.items()])
+    entries, skipped_basics = collection_entries(parsed_lines, resolved)
+    collection_db.add(entries)
 
     return {
-        "added_distinct": len(aggregated),
-        "added_total": sum(quantity for _, quantity in aggregated.values()),
+        "added_distinct": len(entries),
+        "added_total": sum(quantity for _, _, quantity in entries),
         "skipped_basic_lands": skipped_basics,
         "issues": [{"raw_line": line, "reason": reason} for line, reason in issues],
     }

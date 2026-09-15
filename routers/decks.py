@@ -17,6 +17,10 @@ class ImportDeckRequest(BaseModel):
     name: str
     decklist: str
     format: Format = "commander"
+    # Vrai seulement si le deck est physiquement monté : ses cartes entrent
+    # alors dans la collection. Faux par défaut — un deck envisagé ne prouve
+    # pas qu'on possède quoi que ce soit.
+    add_to_collection: bool = False
 
 
 class UpdateDeckRequest(BaseModel):
@@ -44,7 +48,8 @@ def _load_deck(deck_id: int) -> dict:
 def import_deck(payload: ImportDeckRequest):
     if not payload.decklist.strip():
         raise HTTPException(400, "La decklist est vide")
-    return import_decklist(payload.name, payload.decklist, payload.format)
+    return import_decklist(payload.name, payload.decklist, payload.format,
+                           add_to_collection=payload.add_to_collection)
 
 
 @router.get("")
