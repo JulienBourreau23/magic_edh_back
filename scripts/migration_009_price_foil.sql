@@ -1,0 +1,20 @@
+-- Sépare le prix foil du prix normal.
+--
+-- Jusqu'ici `price_eur` valait `prices.eur OR prices.eur_foil` : une carte sans
+-- prix normal héritait silencieusement de son prix foil, souvent plusieurs fois
+-- supérieur. Ce prix-là alimente `cards_cheapest` (l'impression « la moins
+-- chère ») et toute la logique d'achat : un chiffre faux s'y propageait sans
+-- que rien ne le signale à l'écran.
+--
+-- Désormais `price_eur` est le prix non-foil et rien d'autre. Une carte qui
+-- n'existe qu'en foil a donc `price_eur IS NULL` — c'est-à-dire « prix
+-- inconnu », le cas déjà géré partout : on ne la propose pas à l'achat, puisque
+-- le plafond de prix ne peut pas être garanti. Son prix foil reste disponible
+-- dans `price_eur_foil` pour qui veut l'afficher.
+--
+-- À FAIRE APRÈS CETTE MIGRATION, dans cet ordre :
+--   1. psql -d magic_edh -f scripts/rebuild_cheapest_view.sql   (la vue
+--      matérialisée fige ses colonnes : sans ça `price_eur_foil` reste invisible)
+--   2. python scripts/sync_scryfall.py   (repeuple les deux colonnes ; tant
+--      qu'il n'a pas tourné, `price_eur` garde d'anciennes valeurs foil)
+ALTER TABLE cards ADD COLUMN IF NOT EXISTS price_eur_foil NUMERIC;
