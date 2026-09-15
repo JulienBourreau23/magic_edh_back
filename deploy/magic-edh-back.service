@@ -1,0 +1,20 @@
+[Unit]
+Description=Magic EDH API
+After=network.target
+
+[Service]
+User=julien
+WorkingDirectory=/opt/mtg-back/magic_edh_back
+EnvironmentFile=/opt/mtg-back/magic_edh_back/.env
+
+# /tmp est un tmpfs (donc en RAM) sur ces conteneurs, et il annonce la RAM de
+# l'hôte, pas la limite du cgroup : rien n'avertit avant l'OOM. Or le sync des
+# noms français écrit ~400 Mo de bulk data dans un fichier temporaire.
+Environment=TMPDIR=/var/tmp
+
+ExecStart=/opt/mtg-back/magic_edh_back/venv/bin/uvicorn main:app --host 0.0.0.0 --port 8000
+Restart=always
+RestartSec=5
+
+[Install]
+WantedBy=multi-user.target
