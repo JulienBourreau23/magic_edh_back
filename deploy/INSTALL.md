@@ -26,23 +26,38 @@ venv/bin/python -m pytest -q          # 55 tests doivent passer
 
 ## `.env`
 
-Recopier `.env.example` et remplir. `JWT_SECRET` et `AUTH_PASSWORD_HASH` se
-génèrent avec `venv/bin/python scripts/hash_password.py` — le mot de passe en
-clair n'est stocké nulle part.
-
-La base vit sur `lxc-pg18` (192.168.1.104, PostgreSQL 18.6) :
-
-```
-PG_HOST=192.168.1.104
-PG_DATABASE=magic_edh
-CARD_IMAGES_DIR=/srv/mtg-cards
-CORS_ORIGINS=https://mtg-edh.julien-cloud.eu
-```
-
-## Schéma et données
+Déjà en place sur le conteneur (`chmod 600`), avec la base, le rôle et
+`JWT_SECRET` renseignés. **Une seule valeur reste à remplir** :
 
 ```bash
-for f in scripts/migration_0*.sql; do psql -h 192.168.1.104 -U julien -d magic_edh -f "$f"; done
+venv/bin/python scripts/hash_password.py   # coller le hash dans AUTH_PASSWORD_HASH
+```
+
+Le mot de passe en clair n'est stocké nulle part.
+
+## Base de données — faite
+
+Le rôle et la base `magic_edh` existent sur `lxc-pg18` (192.168.1.104,
+PostgreSQL 18.6), avec `pg_trgm` pour la recherche floue. Le schéma et les
+données ont été transférés depuis la base de développement plutôt que
+reconstruits : mêmes comptes à la ligne près.
+
+| Table | Lignes |
+|---|---|
+| `cards` | 99 539 |
+| `cards_cheapest` (matview) | 34 019 |
+| `card_names_fr` | 30 090 |
+| `commander_recommendations` | 1 627 |
+| `collection` | 125 |
+| `decks` / `deck_cards` | 3 / 188 |
+
+Aucune ligne à ajouter dans `pg_hba.conf` : une règle
+`host all all 192.168.1.0/255.255.255.0 scram-sha-256` couvre déjà tout le LAN,
+donc le LXC back est autorisé d'office.
+
+### Rafraîchir les données plus tard
+
+```bash
 venv/bin/python scripts/sync_scryfall.py       # ~99 500 cartes
 venv/bin/python scripts/sync_french_names.py   # ~30 000 alias, bulk de 393 Mo
 venv/bin/python scripts/sync_edhrec.py
