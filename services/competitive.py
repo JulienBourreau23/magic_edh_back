@@ -123,7 +123,7 @@ def curve_of(cards: list[dict]) -> dict[int, int]:
     return curve
 
 
-BASIC_LAND_BY_COLOR = {"W": "Plaine", "U": "Île", "B": "Marais", "R": "Montagne", "G": "Forêt"}
+BASIC_LAND_BY_COLOR = mana.BASIC_LAND_BY_COLOR
 COLORLESS_BASIC_LAND = "Étendue"
 
 

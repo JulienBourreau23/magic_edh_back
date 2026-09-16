@@ -152,7 +152,7 @@ def suggest(cards: list[dict], format: str = "commander",
         }
 
     diagnostics = deck_analysis.role_diagnostics(cards)
-    mana = deck_analysis.manabase(cards)
+    mana = deck_analysis.manabase(cards, deep=True)
     exclude = _deck_oracle_ids(cards)
     # Si on cherche à contenir le bracket, inutile de proposer des cartes qui
     # le feraient remonter aussitôt.

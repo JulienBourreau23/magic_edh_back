@@ -9,8 +9,22 @@ biparti pips -> sources plutôt qu'un comptage par couleur : trois pips {G} face
 doit échouer, ce qu'un simple comptage par couleur ne distingue pas.
 """
 import re
+from functools import lru_cache
+from math import comb
 
 COLORS = frozenset("WUBRG")
+
+# Le terrain de base de chaque couleur, en français comme le reste de l'affichage.
+BASIC_LAND_BY_COLOR = {"W": "Plaine", "U": "Île", "B": "Marais", "R": "Montagne", "G": "Forêt"}
+
+# Fiabilité visée par `sources_needed`. La valeur n'est pas la fiabilité réelle
+# visée (90 %) mais celle qui, dans CE modèle, retombe sur les repères publiés :
+# comme il ne simule ni mulligan ni pioche, il est plus pessimiste qu'une vraie
+# simulation à confiance égale. Calibrée pour donner ~18 sources pour un
+# symbole au tour 2 et ~29 pour un double au tour 3, là où les tables usuelles
+# donnent 19-20 et 27-30. Toucher à cette constante impose de refaire la
+# comparaison — sinon les cibles dérivent en silence.
+SOURCE_CONFIDENCE = 0.80
 _TOKEN_RE = re.compile(r"\{([^}]+)\}")
 
 
@@ -77,3 +91,54 @@ def color_requirements(cards: list[dict]) -> dict[str, int]:
             for color in pip:
                 requirements[color] += card.get("quantity", 1)
     return {color: count for color, count in requirements.items() if count}
+
+
+def _at_least(successes: int, population: int, draws: int, wanted: int) -> float:
+    """P(voir au moins `wanted` exemplaires) en tirant `draws` cartes sans remise."""
+    if wanted <= 0:
+        return 1.0
+    if successes < wanted or draws < wanted:
+        return 0.0
+    total = comb(population, draws)
+    return sum(comb(successes, hit) * comb(population - successes, draws - hit)
+               for hit in range(wanted, min(successes, draws) + 1)) / total
+
+
+@lru_cache(maxsize=None)
+def miss_probability(pips: int, turn: int, sources: int, deck_size: int = 99) -> float:
+    """
+    Probabilité de NE PAS avoir `pips` sources d'une couleur au tour `turn`
+    avec `sources` exemplaires dans un deck de `deck_size` cartes.
+
+    C'est `sources_needed` vue par l'autre bout : au lieu de demander combien
+    il en faut pour une carte, elle dit ce que coûte l'état actuel. Sommée sur
+    le deck, elle donne le nombre de cartes que les couleurs laissent en main —
+    la grandeur qu'on cherche vraiment à faire baisser.
+    """
+    seen = min(deck_size, 6 + turn)
+    return 1.0 - _at_least(sources, deck_size, seen, pips)
+
+
+def sources_needed(pips: int, turn: int,
+                   deck_size: int = 99, confidence: float = SOURCE_CONFIDENCE) -> int:
+    """
+    Combien de sources d'une couleur il faut pour lancer à l'heure, dans
+    `confidence` des parties, un sort qui demande `pips` symboles de cette
+    couleur au tour `turn`.
+
+    Le modèle est celui des tables de manabase communément utilisées : on
+    compte les cartes **vues** au tour visé — sept en main plus une pioche par
+    tour — et on cherche le plus petit nombre de sources tel que la loi
+    hypergéométrique donne au moins `pips` d'entre elles.
+
+    Il ignore volontairement deux choses, dans deux directions opposées : on ne
+    peut poser qu'un terrain par tour (le modèle est donc optimiste sur les
+    tours précoces), mais un mulligan et les effets de pioche font voir plus de
+    cartes (il est pessimiste sur les tours tardifs). C'est un repère de
+    construction, pas une mesure — la mesure, c'est la simulation.
+    """
+    seen = min(deck_size, 6 + turn)  # 7 cartes en main au tour 1, +1 par tour
+    for sources in range(pips, deck_size + 1):
+        if _at_least(sources, deck_size, seen, pips) >= confidence:
+            return sources
+    return deck_size

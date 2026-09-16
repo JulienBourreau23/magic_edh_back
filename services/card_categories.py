@@ -121,6 +121,17 @@ def is_land(card: dict) -> bool:
     return LAND in (card.get("categories") or [])
 
 
+def is_basic_land(card: dict) -> bool:
+    """
+    Terrain de base. Seul cas où le `type_line` fait foi plutôt que les
+    catégories : « de base » est un supertype officiel, pas un rôle déduit, et
+    c'est lui qui distingue une Île d'une Fontaine sacrée. Le préfixe « Snow »
+    des terrains neigeux passe par la même porte, ce qui est voulu — ils sont
+    échangeables comme les autres.
+    """
+    return is_land(card) and "basic" in (card.get("type_line") or "").lower()
+
+
 def count_by_category(cards: list[dict]) -> dict[str, int]:
     """
     Compte les cartes par rôle, pondéré par quantité, **commandant compris** :

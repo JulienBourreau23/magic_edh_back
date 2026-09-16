@@ -5,6 +5,8 @@ seraient du bruit.
 """
 import random
 
+from services import simulation
+from services.card_categories import LAND
 from services.simulation import build_library, draw_opening_hand, simulate
 
 FOREST = {"name": "Forest", "quantity": 40, "cmc": 0, "mana_cost": "", "categories": ["land"],
@@ -59,3 +61,31 @@ def test_le_mulligan_ne_perd_aucune_carte():
         assert len(hand) == 7 - mulligans
 
     assert mulligans_vus != {0}, "aucun mulligan tiré : le test ne prouve rien"
+
+
+def test_une_duale_ne_paie_pas_deux_symboles_de_la_meme_couleur():
+    """
+    Le comptage par couleur voit dix-huit sources blanches dans dix-huit duales
+    W/U et conclut que le blanc est servi. Il l'est pour un {W}, pas pour un
+    {W}{W} : il faut alors deux de ces terrains en jeu en même temps, parmi des
+    terrains qui ne sont pas tous colorés. C'est ce que `can_pay` sait et qu'un
+    comptage par couleur ne peut pas savoir.
+    """
+    def deck(mana_cost, cmc):
+        commander = {"name": "Commandant", "mana_cost": "{W}{U}", "cmc": 2, "quantity": 1,
+                     "color_identity": ["W", "U"], "categories": [], "produced_mana": [],
+                     "type_line": "Creature", "is_commander": True}
+        sorts = [{"name": f"Sort {i}", "mana_cost": mana_cost, "cmc": cmc, "quantity": 1,
+                  "color_identity": ["W"], "categories": [], "produced_mana": [],
+                  "type_line": "Instant", "is_commander": False} for i in range(62)]
+        duales = {"name": "Duale", "mana_cost": None, "cmc": 0, "quantity": 18,
+                  "color_identity": ["W", "U"], "categories": [LAND],
+                  "produced_mana": ["W", "U"], "type_line": "Land", "is_commander": False}
+        incolores = {"name": "Terrain incolore", "mana_cost": None, "cmc": 0, "quantity": 18,
+                     "color_identity": [], "categories": [LAND],
+                     "produced_mana": [], "type_line": "Land", "is_commander": False}
+        return [commander, *sorts, duales, incolores]
+
+    simple = simulation.color_stuck_rate(deck("{1}{W}", 2), iterations=300, seed=0)
+    double = simulation.color_stuck_rate(deck("{W}{W}", 2), iterations=300, seed=0)
+    assert double > simple > 0

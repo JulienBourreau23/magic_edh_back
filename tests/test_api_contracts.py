@@ -80,3 +80,28 @@ def test_carte_inconnue(client):
     reponse = client.post("/wishlist",
                           json={"scryfall_id": "00000000-0000-0000-0000-000000000000"})
     assert reponse.status_code == 404
+
+
+def test_la_fiche_deck_expose_le_diagnostic_de_manabase(client):
+    """
+    Le conseil de manabase traverse HTTP entier : il contient des flottants
+    arrondis et une clé qui vaut parfois None, deux formes qu'une sérialisation
+    peut abîmer sans que le calcul soit en cause.
+    """
+    decks = client.get("/decks").json()
+    if not decks:
+        pytest.skip("aucun deck en base")
+
+    manabase = client.get(f"/decks/{decks[0]['id']}").json()["manabase"]
+
+    assert isinstance(manabase["stuck_cards"], (int, float))
+    assert manabase["strained_total"] >= len(manabase["strained_cards"])
+    for color in manabase["colors"].values():
+        assert color["target"] >= 0
+        assert color["shortfall"] == max(0, color["target"] - color["sources"])
+
+    advice = manabase["basic_lands"]
+    if advice is not None:
+        # Un échange, jamais un achat : le total de basiques est conservé.
+        assert sum(advice["suggested"].values()) == sum(advice["current"].values())
+        assert advice["stuck_after"] <= advice["stuck_before"]

@@ -71,7 +71,7 @@ def get_deck(deck_id: int):
         "total_price_eur": deck_analysis.total_price_eur(cards),
         "legality_warnings": deck_analysis.legality_warnings(cards, deck["format"]),
         "bracket": deck_analysis.bracket_estimate(cards, combos.find_in_deck(cards)),
-        "manabase": deck_analysis.manabase(cards),
+        "manabase": deck_analysis.manabase(cards, deep=True),
         "role_diagnostics": deck_analysis.role_diagnostics(cards),
     }
 

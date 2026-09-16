@@ -230,3 +230,72 @@ def sample_opening(cards: list[dict], seed: int = 0, draws: int = 5) -> dict:
         "hand": describe(hand),
         "draws": describe(deck[:draws]),
     }
+
+
+COLOR_STUCK_ITERATIONS = 600
+COLOR_STUCK_HORIZON = 6
+
+
+def _best_land(hand: list[SimCard], battlefield: list[SimCard]) -> SimCard | None:
+    """
+    Le terrain à poser : celui qui apporte le plus de couleurs qu'on n'a pas.
+
+    `play_one` prend le premier terrain venu, ce qui suffit à mesurer une
+    vitesse. Ici on mesure une manabase : poser au hasard punirait une bonne
+    répartition autant qu'une mauvaise. On reste sur un critère bon marché — la
+    couverture des couleurs — plutôt qu'un choix optimal qui coûterait un
+    `can_pay` par terrain et par carte en main.
+    """
+    lands = [card for card in hand if card.is_land]
+    if not lands:
+        return None
+    held = {color for land in battlefield for color in land.produces}
+    return max(lands, key=lambda land: (len(land.produces - held), len(land.produces)))
+
+
+def color_stuck_rate(cards: list[dict], iterations: int = COLOR_STUCK_ITERATIONS,
+                     seed: int = 0) -> float:
+    """
+    Part des sorts qu'on aurait pu lancer — le mana total est là — mais que les
+    **couleurs** laissent en main.
+
+    C'est la mesure que l'estimation analytique de `deck_analysis` approxime, et
+    la seule qui voie ce qu'elle ne peut pas voir : `can_pay` fait le couplage
+    biparti, donc une duale W/U ne paie qu'un symbole à la fois. Un deck dont
+    les sources blanches sont presque toutes des duales W/U paraît servi
+    couleur par couleur et ne l'est pas dès qu'il lui faut les deux ensemble.
+
+    Le commandant est candidat à chaque tour : il attend dans la zone de
+    commandement, pas dans la bibliothèque.
+    """
+    library, commander = build_library(cards)
+    if len(library) < 7:
+        return 0.0
+
+    rng = random.Random(seed)
+    stuck = chances = 0
+    for _ in range(iterations):
+        hand, deck, _ = draw_opening_hand(rng, library)
+        battlefield: list[SimCard] = []
+        for turn in range(1, COLOR_STUCK_HORIZON + 1):
+            if turn > 1 and deck:
+                hand.append(deck.pop(0))
+            land = _best_land(hand, battlefield)
+            if land:
+                hand.remove(land)
+                battlefield.append(land)
+            for rock in sorted((c for c in hand if c.is_ramp), key=lambda c: c.cmc):
+                if can_pay(rock.generic, list(rock.pips), sources_in_play(battlefield)):
+                    hand.remove(rock)
+                    battlefield.append(rock)
+
+            sources = sources_in_play(battlefield)
+            playable = [c for c in hand if not c.is_land and c.cmc <= len(sources)]
+            if commander is not None and commander.cmc <= len(sources):
+                playable.append(commander)
+            for card in playable:
+                chances += 1
+                if not can_pay(card.generic, list(card.pips), sources):
+                    stuck += 1
+
+    return stuck / chances if chances else 0.0

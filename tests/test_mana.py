@@ -2,7 +2,8 @@
 Le calcul de castabilité décide si un deck est jouable ou non : c'est la partie
 où une approximation se verrait dans les conseils donnés à l'utilisateur.
 """
-from services.mana import can_pay, color_requirements, parse_mana_cost
+from services.mana import (SOURCE_CONFIDENCE, can_pay, color_requirements,
+                           miss_probability, parse_mana_cost, sources_needed)
 
 
 def source(*colors: str) -> frozenset[str]:
@@ -56,3 +57,30 @@ def test_comptage_des_pips_par_couleur():
         {"mana_cost": None, "quantity": 5},
     ]
     assert color_requirements(cards) == {"B": 2, "R": 2}
+
+
+def test_sources_needed_croit_avec_les_symboles_et_decroit_avec_le_tour():
+    # Un double coûte plus cher qu'un simple ; attendre un tour coûte moins cher.
+    assert sources_needed(2, 3) > sources_needed(1, 3)
+    assert sources_needed(1, 5) < sources_needed(1, 2)
+
+
+def test_sources_needed_reste_sur_les_reperes_publies():
+    # Garde-fou de calibration : SOURCE_CONFIDENCE est réglée pour retomber sur
+    # les tables de manabase usuelles (~19-20 sources pour un symbole au tour 2,
+    # ~27-30 pour un double au tour 3). La changer sans refaire la comparaison
+    # ferait dériver toutes les cibles en silence.
+    assert 17 <= sources_needed(1, 2) <= 21
+    assert 26 <= sources_needed(2, 3) <= 31
+
+
+def test_miss_probability_est_l_envers_de_sources_needed():
+    # Au nombre de sources conseillé, le risque restant tient dans 1 - confiance.
+    needed = sources_needed(2, 4)
+    assert miss_probability(2, 4, needed) <= 1 - SOURCE_CONFIDENCE
+    assert miss_probability(2, 4, needed - 1) > 1 - SOURCE_CONFIDENCE
+
+
+def test_miss_probability_decroit_quand_les_sources_montent():
+    serie = [miss_probability(1, 3, sources) for sources in range(5, 40, 5)]
+    assert serie == sorted(serie, reverse=True)
