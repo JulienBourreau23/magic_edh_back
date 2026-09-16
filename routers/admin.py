@@ -9,6 +9,7 @@ router = APIRouter(prefix="/admin", tags=["admin"])
 def sync_edhrec(
     include_decks: bool = Query(default=False, description="inclure les commandants des decks"),
     delay: float = Query(default=edhrec.DEFAULT_DELAY_SECONDS, ge=0.2, le=10),
+    with_themes: bool = Query(default=True, description="récupérer aussi les archétypes"),
 ):
     """
     Déclenche la récupération EDHREC et renvoie un résumé.
@@ -18,7 +19,7 @@ def sync_edhrec(
     retour plutôt qu'un « accepté » sans garantie. Le plancher sur `delay`
     empêche de marteler un site communautaire gratuit depuis un planificateur.
     """
-    return edhrec.sync(include_decks=include_decks, delay=delay)
+    return edhrec.sync(include_decks=include_decks, delay=delay, with_themes=with_themes)
 
 
 @router.post("/sync-combos")

@@ -105,6 +105,24 @@ def resolve_names(names: list[str]) -> dict[str, dict]:
     return resolved
 
 
+def get_cheapest_by_oracle_id(oracle_id: str) -> dict | None:
+    """L'impression la moins chère d'une carte, nom français compris. Sert aux
+    écrans qui raisonnent par carte et non par impression (commandant choisi,
+    construction compétitive)."""
+    with get_conn() as conn:
+        with conn.cursor() as cur:
+            cur.execute(
+                """
+                SELECT c.*, fr.printed_name AS name_fr
+                FROM cards_cheapest c
+                LEFT JOIN card_names_fr fr ON fr.oracle_id = c.oracle_id
+                WHERE c.oracle_id = %s
+                """,
+                (oracle_id,),
+            )
+            return cur.fetchone()
+
+
 def get_by_scryfall_id(scryfall_id: str) -> dict | None:
     with get_conn() as conn:
         with conn.cursor() as cur:

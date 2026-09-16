@@ -26,15 +26,19 @@ def main() -> None:
                         help="inclure aussi les commandants de tes decks, pas seulement la collection")
     parser.add_argument("--delay", type=float, default=DEFAULT_DELAY_SECONDS,
                         help="pause entre deux requêtes, en secondes")
+    parser.add_argument("--no-themes", action="store_true",
+                        help="ne pas récupérer les archétypes (une requête par thème)")
     args = parser.parse_args()
 
-    resume = sync(include_decks=args.all, delay=args.delay)
+    resume = sync(include_decks=args.all, delay=args.delay, with_themes=not args.no_themes)
     print(f"{resume['commanders_found']} commandant(s) trouve(s), "
           f"{resume['synced']} synchronise(s), "
-          f"{resume['recommendations_total']} recommandations.")
+          f"{resume['recommendations_total']} recommandations, "
+          f"{resume['themes_total']} thème(s).")
 
     for entree in resume["details"]:
-        print(f"  {entree['commander']} — {entree['recommendations']} recommandations")
+        themes = ", ".join(entree["themes"]) or "aucun thème"
+        print(f"  {entree['commander']} — {entree['recommendations']} recommandations ({themes})")
     for entree in resume["not_found"]:
         print(f"  ABSENT : {entree['commander']} (slug « {entree['slug']} »)")
     for entree in resume["failed"]:

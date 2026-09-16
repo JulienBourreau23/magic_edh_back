@@ -27,6 +27,14 @@ from db.core import get_conn
 EDHREC_JSON_BASE = "https://json.edhrec.com/pages/commanders"
 DEFAULT_DELAY_SECONDS = 1.0
 
+# Thèmes récupérés par commandant, les plus joués d'abord. Au-delà, ce sont des
+# archétypes confidentiels dont les listes ne veulent statistiquement rien dire
+# — et chaque thème coûte une requête à un site communautaire gratuit.
+MAX_THEMES_PER_COMMANDER = 8
+# En dessous, l'échantillon est trop mince pour qu'un taux d'inclusion ait un
+# sens : quelques dizaines de decks suffisent à faire dire n'importe quoi.
+MIN_THEME_DECKS = 50
+
 # Sections retenues : celles qui portent une information exploitable pour
 # construire un deck. Les rubriques éditoriales ("New Cards") sont ignorées.
 WANTED_SECTIONS = {
@@ -97,6 +105,102 @@ def extract_recommendations(payload: dict) -> list[tuple[str, str, float | None,
     return rows
 
 
+def fetch_theme(client: httpx.Client, slug: str, theme_slug: str) -> dict | None:
+    """La page d'un thème pour un commandant : mêmes sections, listes filtrées."""
+    response = client.get(f"{EDHREC_JSON_BASE}/{slug}/{theme_slug}.json")
+    if response.status_code == 404:
+        return None
+    response.raise_for_status()
+    return response.json()
+
+
+def extract_themes(payload: dict) -> list[dict]:
+    """
+    Les archétypes du commandant, du plus joué au moins joué. `tag_counts` est
+    la source : `panels.taglinks` porte la même chose pour l'affichage.
+    """
+    themes = []
+    for tag in payload.get("tag_counts") or []:
+        if not tag.get("slug") or (tag.get("count") or 0) < MIN_THEME_DECKS:
+            continue
+        themes.append({"slug": tag["slug"], "label": tag.get("value") or tag["slug"],
+                       "deck_count": tag["count"]})
+    return themes[:MAX_THEMES_PER_COMMANDER]
+
+
+def extract_profile(payload: dict) -> tuple[dict, dict]:
+    """
+    (cartes par type, courbe de mana) des decks réels du thème.
+
+    C'est une cible **mesurée** et non un repère inventé : le camembert
+    d'EDHREC dit combien de terrains et de créatures jouent ceux qui montent
+    cette stratégie, et la courbe dit à quels coûts. Les deux servent de
+    gabarit au constructeur.
+    """
+    panels = payload.get("panels") or {}
+    type_counts = {
+        entry["label"]: entry["value"]
+        for entry in (panels.get("piechart") or {}).get("content") or []
+        if entry.get("label") is not None
+    }
+    curve = {str(k): v for k, v in (panels.get("mana_curve") or {}).items()}
+    return type_counts, curve
+
+
+def store_themes(commander_oracle_id: str, themes: list[dict]) -> None:
+    """Remplace les thèmes du commandant : table entièrement reconstructible."""
+    with get_conn() as conn:
+        with conn.cursor() as cur:
+            cur.execute("DELETE FROM commander_themes WHERE commander_oracle_id = %s",
+                        (commander_oracle_id,))
+            for theme in themes:
+                cur.execute(
+                    """
+                    INSERT INTO commander_themes
+                        (commander_oracle_id, slug, label, deck_count, type_counts, mana_curve)
+                    VALUES (%s, %s, %s, %s, %s, %s)
+                    """,
+                    (commander_oracle_id, theme["slug"], theme["label"], theme["deck_count"],
+                     json.dumps(theme.get("type_counts") or {}),
+                     json.dumps(theme.get("mana_curve") or {})),
+                )
+
+
+def store_theme_cards(commander_oracle_id: str, theme_slug: str, recommendations: list) -> int:
+    """Même conversion `scryfall_id` -> `oracle_id` que pour le commandant."""
+    with get_conn() as conn:
+        with conn.cursor() as cur:
+            cur.execute(
+                "DELETE FROM theme_recommendations "
+                "WHERE commander_oracle_id = %s AND theme_slug = %s",
+                (commander_oracle_id, theme_slug),
+            )
+            if not recommendations:
+                return 0
+            cur.execute(
+                """
+                INSERT INTO theme_recommendations
+                    (commander_oracle_id, theme_slug, card_oracle_id, section, synergy, inclusion_rate)
+                SELECT %(commander)s, %(theme)s, c.oracle_id, v.section, v.synergy, v.inclusion
+                FROM unnest(%(ids)s::uuid[], %(sections)s::text[],
+                            %(synergies)s::numeric[], %(inclusions)s::numeric[])
+                     AS v(scryfall_id, section, synergy, inclusion)
+                JOIN cards c ON c.scryfall_id = v.scryfall_id
+                ON CONFLICT DO NOTHING
+                """,
+                {"commander": commander_oracle_id, "theme": theme_slug,
+                 "ids": [r[0] for r in recommendations], "sections": [r[1] for r in recommendations],
+                 "synergies": [r[2] for r in recommendations],
+                 "inclusions": [r[3] for r in recommendations]},
+            )
+            cur.execute(
+                "SELECT count(DISTINCT card_oracle_id) AS cards FROM theme_recommendations "
+                "WHERE commander_oracle_id = %s AND theme_slug = %s",
+                (commander_oracle_id, theme_slug),
+            )
+            return cur.fetchone()["cards"]
+
+
 def store(commander_oracle_id: str, recommendations: list, bracket_counts: dict | None) -> int:
     """
     Les cartes sont référencées par `scryfall_id` chez EDHREC : on le convertit
@@ -160,10 +264,20 @@ def store(commander_oracle_id: str, recommendations: list, bracket_counts: dict 
 
 
 
-def sync(include_decks: bool = False, delay: float = DEFAULT_DELAY_SECONDS) -> dict:
-    """Renvoie un résumé exploitable par un ordonnanceur (Kestra lit le JSON)."""
+def sync(include_decks: bool = False, delay: float = DEFAULT_DELAY_SECONDS,
+         with_themes: bool = True) -> dict:
+    """
+    Renvoie un résumé exploitable par un ordonnanceur (Kestra lit le JSON).
+
+    `with_themes` récupère en plus, pour chaque commandant, les archétypes les
+    plus joués et leurs listes de cartes. C'est ce qui permet de construire un
+    deck *orienté* (Atraxa infect) plutôt qu'un agrégat de tout ce qui se joue
+    avec le commandant. Une requête par thème : d'où le plafond, la pause
+    conservée entre chaque, et la possibilité de couper.
+    """
     commanders = commanders_to_fetch(include_decks)
     resultats, introuvables, echecs = [], [], []
+    themes_total = 0
 
     with httpx.Client(timeout=30, headers=SCRYFALL_HEADERS, follow_redirects=True) as client:
         for index, (oracle_id, name) in enumerate(commanders):
@@ -179,7 +293,29 @@ def sync(include_decks: bool = False, delay: float = DEFAULT_DELAY_SECONDS) -> d
                 continue
 
             stored = store(oracle_id, extract_recommendations(payload), payload.get("bracket_counts"))
-            resultats.append({"commander": name, "recommendations": stored})
+
+            themes = []
+            if with_themes:
+                for theme in extract_themes(payload):
+                    time.sleep(delay)
+                    try:
+                        theme_payload = fetch_theme(client, slug, theme["slug"])
+                    except httpx.HTTPError as error:
+                        echecs.append({"commander": f"{name} / {theme['slug']}",
+                                       "reason": str(error)})
+                        continue
+                    if theme_payload is None:
+                        continue
+                    type_counts, curve = extract_profile(theme_payload)
+                    theme = {**theme, "type_counts": type_counts, "mana_curve": curve}
+                    themes.append(theme)
+                    store_theme_cards(oracle_id, theme["slug"],
+                                      extract_recommendations(theme_payload))
+                store_themes(oracle_id, themes)
+                themes_total += len(themes)
+
+            resultats.append({"commander": name, "recommendations": stored,
+                              "themes": [t["slug"] for t in themes]})
 
             if index < len(commanders) - 1:
                 time.sleep(delay)
@@ -188,6 +324,7 @@ def sync(include_decks: bool = False, delay: float = DEFAULT_DELAY_SECONDS) -> d
         "commanders_found": len(commanders),
         "synced": len(resultats),
         "recommendations_total": sum(r["recommendations"] for r in resultats),
+        "themes_total": themes_total,
         "not_found": introuvables,
         "failed": echecs,
         "details": resultats,
