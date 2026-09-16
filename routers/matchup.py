@@ -1,7 +1,7 @@
 from fastapi import APIRouter, HTTPException, Query
 
 import db.decks as decks_db
-from services import matchup, simulation
+from services import combos, matchup, simulation
 
 router = APIRouter(prefix="/matchup", tags=["matchup"])
 
@@ -22,4 +22,8 @@ def compare_decks(a: int = Query(description="id du premier deck"),
             raise HTTPException(404, f"Deck {deck_id} introuvable")
         decks[key] = (deck, decks_db.get_deck_cards_for_simulation(deck_id))
 
-    return matchup.compare(*decks["a"], *decks["b"], iterations=iterations, seed=seed)
+    return matchup.compare(
+        *decks["a"], *decks["b"], iterations=iterations, seed=seed,
+        combos_a=combos.find_in_deck(decks["a"][1]),
+        combos_b=combos.find_in_deck(decks["b"][1]),
+    )

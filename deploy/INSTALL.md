@@ -21,7 +21,7 @@ git clone https://github.com/JulienBourreau23/magic_edh_back.git /opt/mtg-back/m
 cd /opt/mtg-back/magic_edh_back
 python3 -m venv venv
 venv/bin/pip install -r requirements.txt
-venv/bin/python -m pytest -q          # 63 tests doivent passer
+venv/bin/python -m pytest -q          # 71 tests doivent passer
 ```
 
 ## `.env`
@@ -34,6 +34,16 @@ venv/bin/python scripts/hash_password.py   # coller le hash dans AUTH_PASSWORD_H
 ```
 
 Le mot de passe en clair n'est stocké nulle part.
+
+## Migrations
+
+Les `scripts/migration_0*.sql` sont à rejouer dans l'ordre sur une base
+existante. La dernière, `migration_010_combos.sql`, crée la table `combos` :
+
+```bash
+psql -h 192.168.1.104 -U julien -d magic_edh -f scripts/migration_010_combos.sql
+venv/bin/python scripts/sync_combos.py
+```
 
 ## Base de données — faite
 
@@ -61,7 +71,14 @@ donc le LXC back est autorisé d'office.
 venv/bin/python scripts/sync_scryfall.py       # ~99 500 cartes
 venv/bin/python scripts/sync_french_names.py   # ~30 000 alias, bulk de 393 Mo
 venv/bin/python scripts/sync_edhrec.py
+venv/bin/python scripts/sync_combos.py         # ~4 000 combos à deux cartes
 ```
+
+`sync_combos.py` parcourt une quarantaine de pages de l'API Commander
+Spellbook, qui limite le débit : le script encaisse les 429 en doublant
+l'attente, mais ne lance pas deux synchros coup sur coup. La table n'est
+réécrite qu'à la fin — un échec en cours de route laisse l'ancien catalogue
+intact.
 
 Après une correction d'une règle de `services/card_categories.py`, les
 catégories déjà en base gardent l'ancien verdict : les rejouer sans

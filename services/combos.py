@@ -1,0 +1,39 @@
+"""
+services/combos.py — les combos à deux cartes présents dans un deck.
+
+Le catalogue vient de Commander Spellbook (`services/spellbook.py`) ; ici on ne
+fait que croiser : un combo est « présent » quand ses deux cartes sont dans la
+liste. C'est un constat, pas une estimation — d'où l'identifiant Spellbook
+renvoyé avec, pour aller vérifier le combo à la main.
+"""
+import db.combos as combos_db
+from services.deck_analysis import display_name
+
+SPELLBOOK_COMBO_URL = "https://commanderspellbook.com/combo/{variant_id}/"
+
+
+def _describe(row: dict, by_oracle: dict[str, dict]) -> dict:
+    first, second = by_oracle[str(row["oracle_id_a"])], by_oracle[str(row["oracle_id_b"])]
+    return {
+        "variant_id": row["variant_id"],
+        "url": SPELLBOOK_COMBO_URL.format(variant_id=row["variant_id"]),
+        # Les noms viennent des cartes du deck, pas du catalogue : c'est la même
+        # règle d'affichage que partout (français si connu, anglais sinon).
+        "cards": [display_name(first), display_name(second)],
+        "produces": row["produces"],
+        "wins_outright": row["wins_outright"],
+        "mana_needed": row["mana_needed"],
+        # Mana total pour lancer les deux cartes **et** exécuter le combo : c'est
+        # le chiffre qui dit si le combo est un plan de fin de partie (toléré au
+        # bracket 3) ou un plan de départ. À lire avec le ramp du deck, pas seul.
+        "total_mana_value": int((first["cmc"] or 0) + (second["cmc"] or 0)
+                                + (row["mana_value_needed"] or 0)),
+        "bracket_tag": row["bracket_tag"],
+        "popularity": row["popularity"],
+    }
+
+
+def find_in_deck(cards: list[dict]) -> list[dict]:
+    """Les combos à deux cartes du deck, les gagnants d'abord."""
+    by_oracle = {str(card["oracle_id"]): card for card in cards if card.get("oracle_id")}
+    return [_describe(row, by_oracle) for row in combos_db.find_pairs(sorted(by_oracle))]

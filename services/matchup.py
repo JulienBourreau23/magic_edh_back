@@ -11,13 +11,14 @@ from services import deck_analysis, duel, simulation
 INTERACTION_CATEGORIES = [categories.REMOVAL, categories.COUNTERSPELL, categories.BOARD_WIPE]
 
 
-def _profile(deck: dict, cards: list[dict], iterations: int, seed: int) -> dict:
+def _profile(deck: dict, cards: list[dict], iterations: int, seed: int,
+             combos: list[dict] | None = None) -> dict:
     metrics = simulation.simulate(cards, iterations=iterations, seed=seed)
     role_counts = categories.count_by_category(cards)
     return {
         "deck_id": deck["id"],
         "name": deck["name"],
-        "bracket": deck_analysis.bracket_estimate(cards),
+        "bracket": deck_analysis.bracket_estimate(cards, combos),
         "manabase": deck_analysis.manabase(cards),
         "role_counts": role_counts,
         "interaction_count": sum(role_counts.get(c, 0) for c in INTERACTION_CATEGORIES),
@@ -78,9 +79,15 @@ def _axis(label: str, a_value, b_value, lower_is_better: bool, hint: str) -> dic
 
 
 def compare(deck_a: dict, cards_a: list[dict], deck_b: dict, cards_b: list[dict],
-            iterations: int = simulation.DEFAULT_ITERATIONS, seed: int = 0) -> dict:
-    profile_a = _profile(deck_a, cards_a, iterations, seed)
-    profile_b = _profile(deck_b, cards_b, iterations, seed)
+            iterations: int = simulation.DEFAULT_ITERATIONS, seed: int = 0,
+            combos_a: list[dict] | None = None, combos_b: list[dict] | None = None) -> dict:
+    """
+    Les combos sont passés par l'appelant plutôt que lus ici : ce module reste
+    une pure fonction des cartes qu'on lui donne, ce qui le rend testable sans
+    base — c'est aussi ce qui permet de comparer deux decks fabriqués à la main.
+    """
+    profile_a = _profile(deck_a, cards_a, iterations, seed, combos_a)
+    profile_b = _profile(deck_b, cards_b, iterations, seed, combos_b)
     sim_a, sim_b = profile_a["simulation"], profile_b["simulation"]
 
     axes = [

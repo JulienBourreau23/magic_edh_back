@@ -1,6 +1,6 @@
 from fastapi import APIRouter, Query
 
-from services import edhrec
+from services import edhrec, spellbook
 
 router = APIRouter(prefix="/admin", tags=["admin"])
 
@@ -19,3 +19,15 @@ def sync_edhrec(
     empêche de marteler un site communautaire gratuit depuis un planificateur.
     """
     return edhrec.sync(include_decks=include_decks, delay=delay)
+
+
+@router.post("/sync-combos")
+def sync_combos(delay: float = Query(default=spellbook.DEFAULT_DELAY_SECONDS, ge=0.2, le=10)):
+    """
+    Réimporte le catalogue de combos à deux cartes depuis Commander Spellbook.
+
+    Synchrone comme la synchro EDHREC, et pour la même raison : une quarantaine
+    de pages, donc moins d'une minute, et l'ordonnanceur obtient un vrai code de
+    retour. Le catalogue bouge lentement — une fois par semaine suffit.
+    """
+    return spellbook.sync(delay=delay)

@@ -5,7 +5,7 @@ from pydantic import BaseModel, Field
 
 import db.decks as decks_db
 import services.card_images as card_images
-from services import deck_analysis, simulation, suggestions
+from services import combos, deck_analysis, simulation, suggestions
 from services.decklist_parser import import_decklist
 
 router = APIRouter(prefix="/decks", tags=["decks"])
@@ -70,7 +70,7 @@ def get_deck(deck_id: int):
         "mana_curve": deck_analysis.mana_curve(cards),
         "total_price_eur": deck_analysis.total_price_eur(cards),
         "legality_warnings": deck_analysis.legality_warnings(cards, deck["format"]),
-        "bracket": deck_analysis.bracket_estimate(cards),
+        "bracket": deck_analysis.bracket_estimate(cards, combos.find_in_deck(cards)),
         "manabase": deck_analysis.manabase(cards),
         "role_diagnostics": deck_analysis.role_diagnostics(cards),
     }

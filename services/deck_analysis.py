@@ -150,18 +150,28 @@ def legality_warnings(cards: list[dict], format: str = "commander") -> list[dict
     return warnings
 
 
-def bracket_estimate(cards: list[dict]) -> dict:
+def bracket_estimate(cards: list[dict], combos: list[dict] | None = None) -> dict:
     """
-    Bracket officiel du Commander Format Panel, dont le seul critère
-    directement quantifiable est le nombre de Game Changers : 0 = brackets 1-2,
-    1 à 3 = bracket 3, 4+ = brackets 4-5. Le commandant compte s'il est lui-même
-    sur la liste.
+    Bracket officiel du Commander Format Panel, à partir des deux critères
+    qu'on sait constater.
 
-    Les autres critères officiels (combos à deux cartes, tours supplémentaires,
-    stax, destruction de terrains) ne sont pas quantifiables de façon fiable
-    depuis les données de carte : on les remonte en signaux bruts, sans les
-    laisser modifier le bracket, pour que l'écart entre le calcul et la réalité
-    reste visible plutôt que masqué derrière un chiffre.
+    1. **Game Changers** : 0 = brackets 1-2, 1 à 3 = bracket 3, 4+ = brackets
+       4-5. Le commandant compte s'il est lui-même sur la liste.
+    2. **Combos infinis à deux cartes qui gagnent la partie** : officiellement
+       interdits aux brackets 1-2. Un tel combo ne se lit pas dans le texte
+       d'une carte — il naît de l'interaction — donc il se constate contre un
+       catalogue (`services/combos.py`), et le déclarer relève ici du plancher.
+
+    Ce que ce calcul ne tranche **pas** : au-dessus du bracket 3, le texte
+    officiel demande qu'un combo à deux cartes reste un plan de fin de partie,
+    sans définir « fin de partie ». Le mana total du combo est renvoyé avec,
+    à lire avec le ramp du deck ; c'est au joueur de trancher.
+
+    Les autres critères officiels (tours supplémentaires, stax, destruction de
+    terrains) ne sont pas quantifiables de façon fiable depuis les données de
+    carte : on les remonte en signaux bruts, sans les laisser modifier le
+    bracket, pour que l'écart entre le calcul et la réalité reste visible
+    plutôt que masqué derrière un chiffre.
     """
     game_changers = [
         {"name": c["name"], "name_fr": c.get("name_fr"),
@@ -169,8 +179,10 @@ def bracket_estimate(cards: list[dict]) -> dict:
         for c in cards if c.get("game_changer")
     ]
     count = len(game_changers)
+    combos = combos or []
+    winning_combos = [combo for combo in combos if combo["wins_outright"]]
 
-    if count == 0:
+    if count == 0 and not winning_combos:
         bracket = {"min": 1, "max": 2, "label": "Bracket 1-2 (exhibition / core)"}
     elif count <= 3:
         bracket = {"min": 3, "max": 3, "label": "Bracket 3 (upgraded)"}
@@ -190,11 +202,15 @@ def bracket_estimate(cards: list[dict]) -> dict:
         "game_changers": game_changers,
         "game_changer_count": count,
         **bracket,
+        "two_card_combos": combos,
+        "winning_combo_count": len(winning_combos),
         "qualitative_signals": qualitative,
         "note": (
-            "Plancher calculé sur les Game Changers (seul critère officiel "
-            "quantifiable). Les signaux ci-contre (tuteurs, tours supplémentaires, "
-            "stax) comptent aussi dans le système officiel mais ne sont pas "
-            "automatisables de façon fiable : à toi de trancher."
+            "Plancher calculé sur les Game Changers et sur les combos à deux "
+            "cartes qui gagnent la partie (interdits aux brackets 1-2). Le "
+            "système officiel demande en plus qu'un tel combo reste un plan de "
+            "fin de partie : compare son mana total au ramp du deck. Les "
+            "signaux ci-contre (tuteurs, tours supplémentaires, stax) comptent "
+            "aussi mais ne sont pas automatisables : à toi de trancher."
         ),
     }
