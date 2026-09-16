@@ -23,6 +23,7 @@ import httpx
 
 from config import SCRYFALL_HEADERS
 from db.core import get_conn
+from db.themes import ALL_THEMES_LABEL, ALL_THEMES_SLUG
 
 EDHREC_JSON_BASE = "https://json.edhrec.com/pages/commanders"
 DEFAULT_DELAY_SECONDS = 1.0
@@ -34,6 +35,7 @@ MAX_THEMES_PER_COMMANDER = 8
 # En dessous, l'échantillon est trop mince pour qu'un taux d'inclusion ait un
 # sens : quelques dizaines de decks suffisent à faire dire n'importe quoi.
 MIN_THEME_DECKS = 50
+
 
 # Sections retenues : celles qui portent une information exploitable pour
 # construire un deck. Les rubriques éditoriales ("New Cards") sont ignorées.
@@ -145,6 +147,21 @@ def extract_profile(payload: dict) -> tuple[dict, dict]:
     }
     curve = {str(k): v for k, v in (panels.get("mana_curve") or {}).items()}
     return type_counts, curve
+
+
+def total_decks(payload: dict) -> int:
+    """
+    Le nombre de decks recensés pour ce commandant.
+
+    Il n'est écrit nulle part tel quel : chaque carte porte le `potential_decks`
+    de sa section, et les sections éditoriales (« New Cards ») en couvrent un
+    sous-ensemble. Le maximum est donc le seul total fiable.
+    """
+    return max(
+        (card.get("potential_decks") or 0)
+        for section in payload.get("container", {}).get("json_dict", {}).get("cardlists", [])
+        for card in section.get("cardviews", [])
+    ) if payload.get("container") else 0
 
 
 def store_themes(commander_oracle_id: str, themes: list[dict]) -> None:
@@ -296,6 +313,13 @@ def sync(include_decks: bool = False, delay: float = DEFAULT_DELAY_SECONDS,
 
             themes = []
             if with_themes:
+                # L'agrégat d'abord : il ne coûte aucune requête (tout est déjà
+                # dans la page du commandant) et garantit qu'aucun commandant
+                # possédé ne reste sans porte d'entrée.
+                types_all, curve_all = extract_profile(payload)
+                themes.append({"slug": ALL_THEMES_SLUG, "label": ALL_THEMES_LABEL,
+                               "deck_count": total_decks(payload),
+                               "type_counts": types_all, "mana_curve": curve_all})
                 for theme in extract_themes(payload):
                     time.sleep(delay)
                     try:

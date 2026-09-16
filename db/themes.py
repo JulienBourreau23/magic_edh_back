@@ -18,6 +18,16 @@ from db.core import get_conn
 # d'une valeur reçue du client.
 LEGALITY_COLUMNS = {"commander": "legal_commander", "duel": "legal_duel"}
 
+# Archétype de repli, toujours présent : l'agrégat de tous les decks du
+# commandant, stratégies confondues. Il existe pour deux raisons. D'abord parce
+# qu'un commandant peu joué n'a aucun thème au-dessus du plancher d'échantillon
+# (Vendilion Clique : son meilleur archétype tient sur 27 decks) et resterait
+# inconstruisible. Ensuite parce qu'à ces effectifs-là, l'agrégat est
+# **statistiquement meilleur** qu'un thème : plus de decks, moins de bruit.
+# Le préfixe `_` ne peut pas entrer en collision avec un slug EDHREC.
+ALL_THEMES_SLUG = "_all"
+ALL_THEMES_LABEL = "Toutes stratégies"
+
 
 def themes_for(commander_oracle_id: str) -> list[dict]:
     """Les archétypes du commandant, du plus joué au moins joué."""
@@ -45,6 +55,24 @@ def theme_coverage(commander_oracle_id: str, format: str) -> dict[str, dict]:
     legality = LEGALITY_COLUMNS[format]
     with get_conn() as conn:
         with conn.cursor() as cur:
+            # L'agrégat n'a pas de lignes dans `theme_recommendations` : son
+            # vivier, ce sont les recommandations du commandant. Sans ce
+            # deuxième volet, il s'afficherait à « 0 / 0 carte ».
+            cur.execute(
+                f"""
+                SELECT %(all_slug)s AS theme_slug,
+                       count(*) AS cards,
+                       count(col.oracle_id) AS owned
+                FROM (SELECT DISTINCT card_oracle_id FROM commander_recommendations
+                      WHERE commander_oracle_id = %(commander)s) r
+                JOIN cards_cheapest c ON c.oracle_id = r.card_oracle_id
+                LEFT JOIN collection col ON col.oracle_id = r.card_oracle_id
+                WHERE c.{legality}
+                """,
+                {"commander": commander_oracle_id, "all_slug": ALL_THEMES_SLUG},
+            )
+            coverage = {row["theme_slug"]: dict(row) for row in cur.fetchall()}
+
             cur.execute(
                 f"""
                 SELECT t.theme_slug,
@@ -59,7 +87,8 @@ def theme_coverage(commander_oracle_id: str, format: str) -> dict[str, dict]:
                 """,
                 (commander_oracle_id,),
             )
-            return {row["theme_slug"]: dict(row) for row in cur.fetchall()}
+            coverage.update({row["theme_slug"]: dict(row) for row in cur.fetchall()})
+            return coverage
 
 
 def build_pool(commander_oracle_id: str, theme_slug: str, format: str,
