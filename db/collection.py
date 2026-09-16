@@ -13,6 +13,10 @@ COLLECTION_COLUMNS = """
     c.scryfall_id, c.oracle_id, c.name, c.mana_cost, c.cmc, c.type_line,
     c.color_identity, c.rarity, c.price_eur, c.image_uri, c.image_downloaded,
     c.legal_commander, c.legal_duel, c.game_changer, c.categories,
+    -- `keywords` ne sert qu'ici : la page collection filtre dessus (vol,
+    -- infection...). Les autres écrans n'en ont pas besoin, d'où son absence
+    -- des colonnes de deck.
+    c.keywords,
     c.produced_mana, c.edhrec_rank, fr.printed_name AS name_fr
 """
 
