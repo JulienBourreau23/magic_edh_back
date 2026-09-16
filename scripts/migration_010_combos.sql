@@ -39,3 +39,33 @@ CREATE TABLE IF NOT EXISTS combos (
 
 CREATE INDEX IF NOT EXISTS combos_oracle_a_idx ON combos (oracle_id_a);
 CREATE INDEX IF NOT EXISTS combos_oracle_b_idx ON combos (oracle_id_b);
+
+-- Aligne les droits sur le rôle qui possède `cards`, c'est-à-dire le rôle
+-- applicatif, quel que soit le compte qui joue cette migration. Sans ça, une
+-- migration passée avec un compte personnel crée une table que l'application
+-- ne peut ni tronquer ni remplir : le sync échoue en « permission denied »
+-- après avoir téléchargé les 40 pages.
+--
+-- Les GRANT d'abord, parce qu'ils suffisent et qu'ils passent toujours ;
+-- le changement de propriétaire ensuite, parce qu'il est plus propre mais
+-- exige d'être membre du rôle cible — ce qui n'est pas garanti. Son échec
+-- n'est donc pas une erreur. Idempotent dans tous les cas.
+DO $$
+DECLARE
+    owner_role TEXT;
+BEGIN
+    SELECT tableowner INTO owner_role FROM pg_tables WHERE tablename = 'cards';
+    IF owner_role IS NULL THEN
+        RAISE NOTICE 'Table `cards` absente : droits non alignés, migration 001 d''abord.';
+        RETURN;
+    END IF;
+
+    EXECUTE format('GRANT ALL PRIVILEGES ON TABLE combos TO %I', owner_role);
+
+    BEGIN
+        EXECUTE format('ALTER TABLE combos OWNER TO %I', owner_role);
+    EXCEPTION WHEN insufficient_privilege THEN
+        RAISE NOTICE 'Propriétaire inchangé (pas membre de %) : les GRANT suffisent.', owner_role;
+    END;
+END
+$$;

@@ -45,6 +45,12 @@ psql -h 192.168.1.104 -U julien -d magic_edh -f scripts/migration_010_combos.sql
 venv/bin/python scripts/sync_combos.py
 ```
 
+**Une migration doit laisser ses tables au rôle applicatif** (celui du `.env`),
+pas au compte qui l'a jouée : sinon l'application ne peut ni écrire ni tronquer
+la table, et l'erreur n'arrive qu'au premier sync. `migration_010` aligne
+elle-même ses droits sur le propriétaire de `cards` ; reprendre ce bloc dans
+les migrations suivantes qui créent une table.
+
 ## Base de données — faite
 
 Le rôle et la base `magic_edh` existent sur `lxc-pg18` (192.168.1.104,
