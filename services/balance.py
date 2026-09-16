@@ -83,7 +83,14 @@ def _adds_for_deck(cards: list[dict], format: str, max_price: float,
 
 def balance(deck_entries: list[tuple[dict, list[dict]]], owned: dict[str, int],
             max_price: float = suggestions.DEFAULT_MAX_PRICE_EUR,
-            target_bracket: int | None = None) -> dict:
+            target_bracket: int | None = None,
+            combos_by_deck: dict[int, list[dict]] | None = None) -> dict:
+    """
+    `combos_by_deck` vient de l'appelant plutôt que d'une lecture ici : le
+    bracket doit être le même que sur la fiche du deck, sinon le bracket visé
+    par défaut — le plus faible du groupe — se calcule sur des chiffres que
+    l'utilisateur ne voit nulle part ailleurs.
+    """
     if not deck_entries:
         return {"error": "aucun deck sélectionné"}
     if len(deck_entries) > MAX_DECKS:
@@ -94,7 +101,11 @@ def balance(deck_entries: list[tuple[dict, list[dict]]], owned: dict[str, int],
     # regardent pas le client, d'où le retrait de la réponse.
     available = allocation.pop("remaining_copies")
 
-    brackets = {deck["id"]: deck_analysis.bracket_estimate(cards) for deck, cards in deck_entries}
+    combos_by_deck = combos_by_deck or {}
+    brackets = {
+        deck["id"]: deck_analysis.bracket_estimate(cards, combos_by_deck.get(deck["id"]))
+        for deck, cards in deck_entries
+    }
     minimums = [bracket["min"] for bracket in brackets.values()]
     target = target_bracket or min(minimums)
 

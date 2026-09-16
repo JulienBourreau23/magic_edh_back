@@ -4,6 +4,7 @@ import db.collection as collection_db
 import db.decks as decks_db
 import services.card_images as card_images
 from services import balance as balance_service
+from services import combos
 from services import suggestions
 
 router = APIRouter(prefix="/balance", tags=["balance"])
@@ -38,6 +39,9 @@ def balance_decks(
             raise HTTPException(404, f"Deck {deck_id} introuvable")
         entries.append((deck, decks_db.get_deck_cards(deck_id)))
 
-    result = balance_service.balance(entries, collection_db.quantities(), max_price, target_bracket)
+    result = balance_service.balance(
+        entries, collection_db.quantities(), max_price, target_bracket,
+        combos_by_deck={deck["id"]: combos.find_in_deck(cards) for deck, cards in entries},
+    )
     card_images.ensure_images(result.get("shopping_list", []))
     return result

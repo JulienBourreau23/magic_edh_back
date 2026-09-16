@@ -3,6 +3,7 @@ from fastapi import APIRouter, HTTPException, Query
 import db.collection as collection_db
 import db.commanders as commanders_db
 import services.card_images as card_images
+from services import combos
 from services import deck_plans as deck_plans_service
 from services.suggestions import DEFAULT_MAX_PRICE_EUR
 
@@ -33,7 +34,8 @@ def build_deck_plans(
     owned = commanders_db.owned_commanders()
     pools = commanders_db.recommendation_pool([str(c["oracle_id"]) for c in owned])
     result = deck_plans_service.plan_decks(
-        owned, pools, collection_db.quantities(), max_price, target_bracket, chosen
+        owned, pools, collection_db.quantities(), max_price, target_bracket, chosen,
+        find_combos=combos.find_in_deck,
     )
 
     selection = result.get("selection")

@@ -97,7 +97,8 @@ def _main_role(card: dict) -> str | None:
 
 
 def build_deck(commander: dict, pool: list[dict], available: dict[str, int],
-               max_price: float, target_bracket: int | None) -> dict:
+               max_price: float, target_bracket: int | None,
+               find_combos=None) -> dict:
     """
     Construit un deck pour ce commandant en consommant `available` (les
     exemplaires encore libres dans la collection, modifié sur place).
@@ -156,11 +157,11 @@ def build_deck(commander: dict, pool: list[dict], available: dict[str, int],
             take(entry, _main_role(entry[1]))
 
     core_cards = [item.pop("_card") for item in chosen]
-    return _describe(commander, chosen, core_cards, pool, available)
+    return _describe(commander, chosen, core_cards, pool, available, find_combos)
 
 
 def _describe(commander: dict, chosen: list[dict], core_cards: list[dict],
-              pool: list[dict], available: dict[str, int]) -> dict:
+              pool: list[dict], available: dict[str, int], find_combos=None) -> dict:
     to_buy = [item for item in chosen if not item["owned"]]
     role_counts = categories.count_by_category(core_cards)
     role_gap = sum(
@@ -196,7 +197,11 @@ def _describe(commander: dict, chosen: list[dict], core_cards: list[dict],
         "role_counts": {role: role_counts.get(role, 0) for role in deck_analysis.ROLE_TARGETS},
         "role_targets": {role: f"{low}-{high}" for role, (low, high) in deck_analysis.ROLE_TARGETS.items()},
         "role_gap": role_gap,
-        "bracket": deck_analysis.bracket_estimate(bracket_input),
+        # Les combos sont cherchés par une fonction injectée : le deck est
+        # construit ici, l'appelant ne peut donc pas les pré-calculer comme le
+        # fait `/balance`. Sans elle, le module reste testable sans base.
+        "bracket": deck_analysis.bracket_estimate(
+            bracket_input, find_combos(bracket_input) if find_combos else None),
         "avg_inclusion": round(sum(inclusions) / len(inclusions), 3) if inclusions else 0.0,
         "lands": _land_plan(commander, pool, available, core_cards),
     }
@@ -287,7 +292,8 @@ def _motif(item: dict) -> str:
 
 
 def _build_group(commanders: list[dict], pools: dict[str, list[dict]], owned: dict[str, int],
-                 max_price: float, natural: dict[str, int], target_bracket: int | None) -> dict:
+                 max_price: float, natural: dict[str, int], target_bracket: int | None,
+                 find_combos=None) -> dict:
     """
     Monte les quatre decks d'un groupe sur une collection partagée.
 
@@ -308,7 +314,8 @@ def _build_group(commanders: list[dict], pools: dict[str, list[dict]], owned: di
     )
 
     plans = [
-        build_deck(commander, pools[str(commander["oracle_id"])], available, max_price, target)
+        build_deck(commander, pools[str(commander["oracle_id"])], available, max_price,
+                   target, find_combos)
         for commander in ordered
     ]
     shopping_list = _shopping_list(plans)
@@ -335,7 +342,7 @@ def _group_score(group: dict) -> tuple:
 
 def plan_decks(commanders: list[dict], pools: dict[str, list[dict]], owned: dict[str, int],
                max_price: float, target_bracket: int | None = None,
-               chosen_oracle_ids: list[str] | None = None) -> dict:
+               chosen_oracle_ids: list[str] | None = None, find_combos=None) -> dict:
     """
     Renvoie la comparaison de tous les commandants et le meilleur groupe de
     quatre (ou celui imposé par `chosen_oracle_ids`).
@@ -353,7 +360,7 @@ def plan_decks(commanders: list[dict], pools: dict[str, list[dict]], owned: dict
     natural = {}
     for commander in usable:
         oracle_id = str(commander["oracle_id"])
-        plan = build_deck(commander, pools[oracle_id], dict(owned), max_price, None)
+        plan = build_deck(commander, pools[oracle_id], dict(owned), max_price, None, find_combos)
         solo[oracle_id] = plan
         natural[oracle_id] = plan["bracket"]["min"]
 
@@ -367,7 +374,7 @@ def plan_decks(commanders: list[dict], pools: dict[str, list[dict]], owned: dict
                     "commanders": [_comparison_row(plan) for plan in comparison],
                     "selection": None}
         group = _build_group([by_id[oid] for oid in chosen_oracle_ids], pools, owned,
-                             max_price, natural, target_bracket)
+                             max_price, natural, target_bracket, find_combos)
         return _result(comparison, group, max_price, len(usable), forced=True)
 
     # Au-delà du garde-fou, on ne garde que les moins chers à monter seuls : un
@@ -381,7 +388,7 @@ def plan_decks(commanders: list[dict], pools: dict[str, list[dict]], owned: dict
 
     size = min(DECKS_TO_BUILD, len(pool_of_commanders))
     best = min(
-        (_build_group(list(group), pools, owned, max_price, natural, target_bracket)
+        (_build_group(list(group), pools, owned, max_price, natural, target_bracket, find_combos)
          for group in combinations(pool_of_commanders, size)),
         key=_group_score,
     )
