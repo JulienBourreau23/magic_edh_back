@@ -31,16 +31,84 @@ def _deck_oracle_ids(cards: list[dict]) -> list[str]:
     return [card["oracle_id"] for card in cards]
 
 
-def cuts_for_bracket(cards: list[dict], target_bracket: int) -> list[dict]:
+CARD_SUMMARY_FIELDS = ("scryfall_id", "name", "name_fr", "price_eur",
+                       "image_uri", "image_downloaded")
+
+
+def _combo_cuts(cards: list[dict], combos: list[dict]) -> list[dict]:
     """
-    Pour redescendre de bracket, le levier officiel est le nombre de Game
-    Changers : 0 pour viser les brackets 1-2, 3 maximum pour le bracket 3.
+    Casser les combos infinis à deux cartes qui gagnent la partie : interdits
+    aux brackets 1-2, tolérés à partir du 3.
+
+    Une seule carte suffit à casser un combo, et la même carte en casse souvent
+    plusieurs (Kiki-Jiki est la moitié de deux d'entre eux) : on retire donc
+    d'abord celle qui en casse le plus, pour proposer le moins de retraits
+    possible. À égalité, la moins jouée — même arbitrage que pour les Game
+    Changers, son absence se sentira le moins.
+
+    **Le commandant ne se coupe pas** : il est toujours disponible en zone de
+    commandement. Un combo dont les deux moitiés sont des commandants est donc
+    incassable, et c'est dit plutôt que passé sous silence.
     """
+    by_oracle = {}
+    for card in cards:
+        by_oracle.setdefault(str(card["oracle_id"]), card)
+
+    unbreakable, remaining = [], []
+    for combo in combos:
+        if not combo["wins_outright"]:
+            continue
+        pieces = [by_oracle[oracle_id] for oracle_id in combo["oracle_ids"]
+                  if oracle_id in by_oracle]
+        cuttable = [card for card in pieces if not card["is_commander"]]
+        if not cuttable:
+            unbreakable.append(combo)
+        else:
+            remaining.append((combo, cuttable))
+
+    cuts, already_cut = [], set()
+    while remaining:
+        counts: dict[str, int] = {}
+        for _, cuttable in remaining:
+            for card in cuttable:
+                counts[card["scryfall_id"]] = counts.get(card["scryfall_id"], 0) + 1
+        candidates = [card for _, cuttable in remaining for card in cuttable]
+        chosen = max(candidates, key=lambda c: (counts[c["scryfall_id"]],
+                                                c.get("edhrec_rank") or 10**9))
+        broken = [combo for combo, cuttable in remaining
+                  if any(card["scryfall_id"] == chosen["scryfall_id"] for card in cuttable)]
+        already_cut.add(chosen["scryfall_id"])
+        remaining = [(combo, cuttable) for combo, cuttable in remaining if combo not in broken]
+        cuts.append({
+            "card": {k: chosen[k] for k in CARD_SUMMARY_FIELDS},
+            "reason": "Combo à deux cartes qui gagne la partie, interdit aux brackets 1-2 : "
+                      + " ; ".join(" + ".join(combo["cards"]) for combo in broken),
+        })
+
+    for combo in unbreakable:
+        cuts.append({
+            "card": None,
+            "reason": "Combo incassable sans changer de commandant : "
+                      + " + ".join(combo["cards"]),
+        })
+    return cuts
+
+
+def cuts_for_bracket(cards: list[dict], target_bracket: int,
+                     combos: list[dict] | None = None) -> list[dict]:
+    """
+    Pour redescendre de bracket, deux leviers officiels : le nombre de Game
+    Changers (0 pour viser les brackets 1-2, 3 maximum pour le bracket 3) et,
+    en dessous du bracket 3, l'absence de combo infini à deux cartes qui gagne
+    la partie. Sans le second, le plan proposé laissait le deck inéligible tout
+    en ayant l'air complet.
+    """
+    combo_cuts = _combo_cuts(cards, combos or []) if target_bracket <= 2 else []
     game_changers = [c for c in cards if c.get("game_changer")]
     allowed = 0 if target_bracket <= 2 else (3 if target_bracket == 3 else len(game_changers))
     surplus = len(game_changers) - allowed
     if surplus <= 0:
-        return []
+        return combo_cuts
 
     # On coupe en priorité les moins jouées : à impact de bracket égal, ce sont
     # celles dont l'absence se sentira le moins dans le deck.
@@ -51,7 +119,7 @@ def cuts_for_bracket(cards: list[dict], target_bracket: int) -> list[dict]:
             "reason": f"Game Changer : en retirer {surplus} pour viser le bracket {target_bracket}",
         }
         for card in ordered[:surplus]
-    ]
+    ] + combo_cuts
 
 
 def _cuts_for_surplus(cards: list[dict], diagnostics: list[dict]) -> list[dict]:
@@ -74,7 +142,8 @@ def _cuts_for_surplus(cards: list[dict], diagnostics: list[dict]) -> list[dict]:
 
 def suggest(cards: list[dict], format: str = "commander",
             max_price: float = DEFAULT_MAX_PRICE_EUR,
-            target_bracket: int | None = None) -> dict:
+            target_bracket: int | None = None,
+            combos: list[dict] | None = None) -> dict:
     identity = deck_analysis.commander_identity(cards)
     if identity is None:
         return {
@@ -123,7 +192,7 @@ def suggest(cards: list[dict], format: str = "commander",
 
     to_cut = _cuts_for_surplus(cards, diagnostics)
     if target_bracket is not None:
-        to_cut = cuts_for_bracket(cards, target_bracket) + to_cut
+        to_cut = cuts_for_bracket(cards, target_bracket, combos) + to_cut
 
     return {
         "format": format,

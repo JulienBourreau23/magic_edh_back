@@ -105,3 +105,71 @@ def test_sans_catalogue_le_calcul_reste_celui_des_game_changers():
     estimation = bracket_estimate([_carte(game_changer=True)])
     assert (estimation["min"], estimation["max"]) == (3, 3)
     assert estimation["two_card_combos"] == []
+
+
+# --- casser un combo pour redescendre de bracket -------------------------
+
+from services.suggestions import cuts_for_bracket  # noqa: E402
+
+ORACLE_KIKI, ORACLE_CONSCRITS = "oracle-kiki", "oracle-conscrits"
+ORACLE_ANGE, ORACLE_CMD = "oracle-ange", "oracle-commandant"
+
+
+def _piece(oracle_id: str, nom: str, *, commandant: bool = False, rang: int = 100) -> dict:
+    return {"oracle_id": oracle_id, "scryfall_id": f"sid-{oracle_id}", "name": nom,
+            "name_fr": None, "price_eur": 1.0, "image_uri": None, "image_downloaded": False,
+            "quantity": 1, "is_commander": commandant, "game_changer": False,
+            "edhrec_rank": rang, "categories": [], "cmc": 5}
+
+
+def _combo_entre(a: str, b: str, noms: list[str], wins: bool = True) -> dict:
+    return {"cards": noms, "oracle_ids": [a, b], "wins_outright": wins,
+            "produces": [], "total_mana_value": 10}
+
+
+def test_un_seul_retrait_casse_deux_combos():
+    # Kiki-Jiki est la moitié de deux combos : le couper une fois suffit, et
+    # c'est ce qu'il faut proposer plutôt que deux retraits.
+    cartes = [_piece(ORACLE_KIKI, "Kiki-Jiki"), _piece(ORACLE_CONSCRITS, "Conscrits zélés"),
+              _piece(ORACLE_ANGE, "Ange de la restauration")]
+    combos = [_combo_entre(ORACLE_KIKI, ORACLE_CONSCRITS, ["Kiki-Jiki", "Conscrits zélés"]),
+              _combo_entre(ORACLE_KIKI, ORACLE_ANGE, ["Kiki-Jiki", "Ange de la restauration"])]
+
+    cuts = cuts_for_bracket(cartes, 2, combos)
+    assert [cut["card"]["name"] for cut in cuts] == ["Kiki-Jiki"]
+
+
+def test_le_commandant_n_est_jamais_coupe():
+    # Il reste disponible en zone de commandement : le couper ne casse rien.
+    cartes = [_piece(ORACLE_CMD, "Commandant", commandant=True),
+              _piece(ORACLE_ANGE, "Ange de la restauration")]
+    combos = [_combo_entre(ORACLE_CMD, ORACLE_ANGE, ["Commandant", "Ange de la restauration"])]
+
+    cuts = cuts_for_bracket(cartes, 2, combos)
+    assert [cut["card"]["name"] for cut in cuts] == ["Ange de la restauration"]
+
+
+def test_combo_incassable_signale_sans_carte():
+    # Deux commandants (partenaires) : aucun retrait ne casse le combo, et le
+    # dire vaut mieux que de rendre une liste vide qui aurait l'air complète.
+    cartes = [_piece(ORACLE_CMD, "Commandant A", commandant=True),
+              _piece(ORACLE_ANGE, "Commandant B", commandant=True)]
+    combos = [_combo_entre(ORACLE_CMD, ORACLE_ANGE, ["Commandant A", "Commandant B"])]
+
+    cuts = cuts_for_bracket(cartes, 2, combos)
+    assert len(cuts) == 1 and cuts[0]["card"] is None
+    assert "incassable" in cuts[0]["reason"]
+
+
+def test_le_bracket_3_tolere_les_combos():
+    cartes = [_piece(ORACLE_KIKI, "Kiki-Jiki"), _piece(ORACLE_CONSCRITS, "Conscrits zélés")]
+    combos = [_combo_entre(ORACLE_KIKI, ORACLE_CONSCRITS, ["Kiki-Jiki", "Conscrits zélés"])]
+    assert cuts_for_bracket(cartes, 3, combos) == []
+
+
+def test_un_combo_qui_ne_gagne_pas_ne_se_casse_pas():
+    # Mana infini sans débouché : il ne ferme aucun bracket.
+    cartes = [_piece(ORACLE_KIKI, "Kiki-Jiki"), _piece(ORACLE_CONSCRITS, "Conscrits zélés")]
+    combos = [_combo_entre(ORACLE_KIKI, ORACLE_CONSCRITS,
+                           ["Kiki-Jiki", "Conscrits zélés"], wins=False)]
+    assert cuts_for_bracket(cartes, 2, combos) == []

@@ -20,6 +20,9 @@ def _describe(row: dict, by_oracle: dict[str, dict]) -> dict:
         # Les noms viennent des cartes du deck, pas du catalogue : c'est la même
         # règle d'affichage que partout (français si connu, anglais sinon).
         "cards": [display_name(first), display_name(second)],
+        # Pour que l'appelant retrouve les cartes du deck sans repasser par les
+        # noms affichés — c'est la règle du projet : on joint par identifiant.
+        "oracle_ids": [str(row["oracle_id_a"]), str(row["oracle_id_b"])],
         "produces": row["produces"],
         "wins_outright": row["wins_outright"],
         "mana_needed": row["mana_needed"],

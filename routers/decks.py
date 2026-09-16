@@ -126,7 +126,8 @@ def deck_suggestions(deck_id: int,
                      target_bracket: int | None = Query(default=None, ge=1, le=5)):
     deck = _load_deck(deck_id)
     cards = decks_db.get_deck_cards(deck_id)
-    result = suggestions.suggest(cards, deck["format"], max_price, target_bracket)
+    result = suggestions.suggest(cards, deck["format"], max_price, target_bracket,
+                                 combos.find_in_deck(cards))
     for group in result.get("to_add", []):
         card_images.ensure_images(group["candidates"])
     return result

@@ -112,7 +112,8 @@ def balance(deck_entries: list[tuple[dict, list[dict]]], owned: dict[str, int],
     plans = []
     for deck, cards in deck_entries:
         bracket = brackets[deck["id"]]
-        cuts = suggestions.cuts_for_bracket(cards, target) if bracket["min"] > target else []
+        cuts = (suggestions.cuts_for_bracket(cards, target, combos_by_deck.get(deck["id"]))
+                if bracket["min"] > target else [])
         adds = _adds_for_deck(cards, deck["format"], max_price, available, target)
 
         purchases = [
