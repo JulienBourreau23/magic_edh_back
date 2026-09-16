@@ -45,10 +45,22 @@ _RULES: list[tuple[str, re.Pattern]] = [
         r"|sacrifice .* regenerate", re.I)),
     (RECURSION, re.compile(r"return .* from (your|a) graveyard", re.I)),
     (EXTRA_TURN, re.compile(r"takes? an extra turn", re.I)),
+    # Stax : priver ou taxer les ressources de l'adversaire. La règle tenait sur
+    # « creatures can't », qui attrape surtout « can't be blocked » et « can't
+    # block » — de l'évasion et des inconvénients, pas du stax. Chaque
+    # alternative ci-dessous nomme donc ce qui est empêché, pas seulement qui.
     (STAX, re.compile(
-        r"(players?|opponents?|creatures?) can't"
-        r"|spells? (your opponents cast )?costs? \{\d+\} more"
-        r"|don't untap", re.I)),
+        # Interdire aux joueurs : lancer, piocher, chercher, gagner de la vie...
+        r"(players?|opponents?|each player) can't\b"
+        # Forteresse : Propaganda, Ghostly Prison, Sphere of Safety.
+        r"|creatures? can't attack"
+        # Taxe sur les sorts et capacités.
+        r"|costs? \{\d+\} more"
+        # Verrou de dégagement statique : Winter Orb, Meekstone, Intruder Alarm.
+        # Le « next » écarte les effets ponctuels (Sleep, Icy Blast), qui sont
+        # du tempo : le stax dure.
+        r"|don't untap during(?!.*\bnext\b)"
+        r"|skips? their untap step", re.I)),
 ]
 
 # Une carte qui va chercher un terrain le nomme de deux façons : par le mot
@@ -57,6 +69,11 @@ _RULES: list[tuple[str, re.Pattern]] = [
 # la fixation de mana un tuteur, et privait de `ramp` tout ce qui cherche par
 # type — les deux erreurs à la fois, sur la même famille de cartes.
 _BASIC_LAND_TYPES = "Plains|Island|Swamp|Mountain|Forest"
+# « Split second » interdit littéralement aux joueurs de lancer des sorts, mais
+# le temps d'une résolution : c'est le rappel d'un mot-clé sur un éphémère
+# (Krosan Grip, Angel's Grace), pas un verrou posé sur la table.
+_SPLIT_SECOND_RE = re.compile(r"split second", re.I)
+
 _LAND_SEARCH_RE = re.compile(
     rf"search your library for .*\b(lands?|{_BASIC_LAND_TYPES})\b", re.I)
 
@@ -81,6 +98,9 @@ def classify(type_line: str | None, oracle_text: str | None, produced_mana: list
     for category, pattern in _RULES:
         if pattern.search(text):
             categories.add(category)
+
+    if STAX in categories and _SPLIT_SECOND_RE.search(text):
+        categories.discard(STAX)
 
     # Chercher un terrain n'est pas tutoriser : le signal "tuteur" du bracket
     # doit compter les cartes qui vont chercher une réponse ou une pièce de

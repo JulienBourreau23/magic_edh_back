@@ -84,3 +84,54 @@ def test_tour_supplementaire():
 
 def test_carte_sans_role_identifie():
     assert classify("Creature — Bear", "", None) == []
+
+
+# --- stax : la règle tenait sur « creatures can't », qui attrapait surtout de
+# l'évasion. Chaque cas ci-dessous est le texte oracle réel de la carte.
+
+def test_stax_forteresse():
+    # Propaganda : empêcher d'attaquer, c'est du stax.
+    assert "stax" in classify("Enchantment",
+        "Creatures can't attack you unless their controller pays {2} for each "
+        "creature they control that's attacking you.", None)
+
+
+def test_stax_interdiction_aux_joueurs():
+    assert "stax" in classify("Artifact",
+        "As long as this artifact is untapped, players can't untap more than "
+        "one land during their untap steps.", None)
+    assert "stax" in classify("Enchantment", "Players skip their untap steps.", None)
+
+
+def test_stax_taxe():
+    assert "stax" in classify("Artifact",
+        "Each spell a player casts costs {1} more to cast for each other spell "
+        "that player has cast this turn.", None)
+
+
+def test_evasion_n_est_pas_du_stax():
+    # « can't be blocked » et « can't block » : de l'évasion et un inconvénient.
+    # 1 055 cartes sur 1 719 étaient marquées stax pour cette seule raison.
+    assert "stax" not in classify("Land",
+        "{T}: Add {C}.\n{4}, {T}: Target creature can't be blocked this turn.", ["C"])
+    assert "stax" not in classify("Artifact — Equipment",
+        "Equipped creature can't be blocked and has shroud.\nEquip {2}", None)
+    assert "stax" not in classify("Creature — Zombie",
+        "This creature can't block.\nSacrifice a creature: Put a +1/+1 counter "
+        "on this creature.", None)
+
+
+def test_effet_ponctuel_n_est_pas_du_stax():
+    # Sleep : ne pas se dégager *au prochain tour* est du tempo. Le stax dure.
+    assert "stax" not in classify("Sorcery",
+        "Tap all creatures target player controls. Those creatures don't untap "
+        "during that player's next untap step.", None)
+
+
+def test_split_second_n_est_pas_du_stax():
+    # Krosan Grip : le rappel du mot-clé dit littéralement « players can't cast
+    # spells », mais le temps d'une résolution.
+    assert "stax" not in classify("Instant",
+        "Split second (As long as this spell is on the stack, players can't cast "
+        "spells or activate abilities that aren't mana abilities.)\n"
+        "Destroy target artifact or enchantment.", None)
