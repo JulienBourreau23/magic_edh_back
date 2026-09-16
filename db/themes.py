@@ -152,59 +152,107 @@ def build_pool(commander_oracle_id: str, theme_slug: str, format: str,
             return cur.fetchall()
 
 
+# Le nombre de non-terrains d'un deck Commander, et la somme des histogrammes
+# de courbe publiés par EDHREC : c'est sur cet effectif qu'on compare.
+NONLAND_SLOTS = 63
+
+
 def best_theme_by_commander(format: str) -> dict[str, dict]:
     """
-    Pour chaque commandant possédé, l'archétype que la collection couvre le
-    mieux — « celui que je peux monter tout de suite », qui n'a rien à voir avec
-    « celui qui est le plus joué ».
+    Pour chaque commandant possédé, l'archétype qu'on peut monter le plus près
+    de la référence **avec la collection**.
+
+    Le score n'est pas un taux de recouvrement (« combien de cartes de la liste
+    j'ai »), qui a deux défauts : il compare des ratios alors que ce qui compte
+    est un compte — il faut 63 non-terrains, pas un pourcentage — et il met une
+    pièce maîtresse jouée dans 80 % des decks au même rang qu'une carte de
+    niche jouée dans 5 %.
+
+    On compare donc **deux decks** : celui qu'on peut bâtir avec la collection
+    (les 63 meilleures cartes possédées) et celui de référence (les 63
+    meilleures, possédées ou non), chacun mesuré par la somme des taux
+    d'inclusion de ses cartes.
+
+    Le classement se fait sur la valeur **absolue** du premier, pas sur le
+    rapport des deux. Le rapport est trompeur pour choisir : l'agrégat « toutes
+    stratégies » a une référence plus molle qu'un archétype marqué — ses cartes
+    sont jouées dans moins de decks chacune — donc on l'approche plus
+    facilement. Sur Atraxa, la collection atteint 99 % de l'agrégat et 93 % de
+    l'infect, alors que le deck infect porte bien plus de consensus (29,7
+    contre 22,2). Le rapport reste renvoyé, pour dire à quel point on est loin
+    de l'optimum de cet archétype-là.
 
     Une seule requête pour tous les commandants : la page en affiche une
-    trentaine, et trente allers-retours pour trier une grille serait absurde.
-    Les recommandations du commandant alimentent l'agrégat, les
-    recommandations de thème alimentent les autres — d'où l'union.
+    trentaine, et trente allers-retours pour trier une grille seraient absurdes.
     """
     legality = LEGALITY_COLUMNS[format]
     with get_conn() as conn:
         with conn.cursor() as cur:
             cur.execute(
                 f"""
-                WITH par_theme AS (
-                    SELECT t.commander_oracle_id, t.theme_slug,
-                           count(*) AS cards,
-                           count(col.oracle_id) AS owned
+                WITH cartes AS (
+                    -- Les cartes de chaque archétype, plus celles de l'agrégat,
+                    -- avec leur taux d'inclusion et le fait qu'on les possède.
+                    SELECT t.commander_oracle_id, t.theme_slug, t.card_oracle_id,
+                           max(t.inclusion_rate) AS rate,
+                           bool_or(col.oracle_id IS NOT NULL) AS owned
                     FROM theme_recommendations t
                     JOIN cards_cheapest c ON c.oracle_id = t.card_oracle_id
                     LEFT JOIN collection col ON col.oracle_id = t.card_oracle_id
-                    WHERE c.{legality}
-                    GROUP BY 1, 2
+                    WHERE c.{legality} AND c.type_line NOT LIKE 'Basic Land%%'
+                    GROUP BY 1, 2, 3
                   UNION ALL
-                    SELECT r.commander_oracle_id, %(all_slug)s,
-                           count(*),
-                           count(col.oracle_id)
-                    FROM (SELECT DISTINCT commander_oracle_id, card_oracle_id
-                          FROM commander_recommendations) r
+                    SELECT r.commander_oracle_id, %(all_slug)s, r.card_oracle_id,
+                           max(r.inclusion_rate),
+                           bool_or(col.oracle_id IS NOT NULL)
+                    FROM commander_recommendations r
                     JOIN cards_cheapest c ON c.oracle_id = r.card_oracle_id
                     LEFT JOIN collection col ON col.oracle_id = r.card_oracle_id
-                    WHERE c.{legality}
-                    GROUP BY 1
+                    WHERE c.{legality} AND c.type_line NOT LIKE 'Basic Land%%'
+                    GROUP BY 1, 2, 3
+                ),
+                reference AS (
+                    SELECT commander_oracle_id, theme_slug, sum(rate) AS ideal
+                    FROM (SELECT *, row_number() OVER (
+                              PARTITION BY commander_oracle_id, theme_slug
+                              ORDER BY rate DESC NULLS LAST) AS rang
+                          FROM cartes) c
+                    WHERE rang <= %(slots)s
+                    GROUP BY 1, 2
+                ),
+                possede AS (
+                    SELECT commander_oracle_id, theme_slug,
+                           sum(rate) AS reachable, count(*) AS owned_cards
+                    FROM (SELECT *, row_number() OVER (
+                              PARTITION BY commander_oracle_id, theme_slug
+                              ORDER BY rate DESC NULLS LAST) AS rang
+                          FROM cartes WHERE owned) c
+                    WHERE rang <= %(slots)s
+                    GROUP BY 1, 2
                 ),
                 classe AS (
-                    SELECT p.*, th.label, th.deck_count,
-                           p.owned::float / NULLIF(p.cards, 0) AS coverage,
+                    SELECT reference.commander_oracle_id, reference.theme_slug,
+                           th.label, th.deck_count,
+                           COALESCE(possede.owned_cards, 0) AS owned_cards,
+                           COALESCE(possede.reachable, 0) / NULLIF(reference.ideal, 0) AS score,
+                           COALESCE(possede.reachable, 0) AS reachable,
                            row_number() OVER (
-                               PARTITION BY p.commander_oracle_id
-                               ORDER BY p.owned::float / NULLIF(p.cards, 0) DESC NULLS LAST,
+                               PARTITION BY reference.commander_oracle_id
+                               ORDER BY COALESCE(possede.reachable, 0) DESC NULLS LAST,
                                         th.deck_count DESC NULLS LAST
                            ) AS rang
-                    FROM par_theme p
+                    FROM reference
+                    LEFT JOIN possede
+                           ON possede.commander_oracle_id = reference.commander_oracle_id
+                          AND possede.theme_slug = reference.theme_slug
                     JOIN commander_themes th
-                      ON th.commander_oracle_id = p.commander_oracle_id
-                     AND th.slug = p.theme_slug
+                      ON th.commander_oracle_id = reference.commander_oracle_id
+                     AND th.slug = reference.theme_slug
                 )
                 SELECT commander_oracle_id, theme_slug, label, deck_count,
-                       cards, owned, coverage
+                       owned_cards, score, reachable
                 FROM classe WHERE rang = 1
                 """,
-                {"all_slug": ALL_THEMES_SLUG},
+                {"all_slug": ALL_THEMES_SLUG, "slots": NONLAND_SLOTS},
             )
             return {str(row["commander_oracle_id"]): dict(row) for row in cur.fetchall()}

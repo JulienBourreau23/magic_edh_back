@@ -38,8 +38,12 @@ def _commander(oracle_id: UUID) -> dict:
 def list_commanders():
     """
     Étape 1 : les commandants de la collection, **classés par ce qu'on peut en
-    tirer tout de suite** — l'archétype dont la collection couvre la plus
-    grande part, affiché avec eux.
+    tirer tout de suite**, avec l'archétype qui donne ce résultat.
+
+    Le critère n'est pas « combien de cartes de la liste j'ai » : une pièce
+    maîtresse jouée dans 80 % des decks ne vaut pas une carte de niche jouée
+    dans 5 %. On somme donc les taux d'inclusion des 63 meilleures cartes
+    possédées — le deck qu'on jouerait — et c'est ce total qui classe.
 
     Ce n'est pas un classement de puissance : un commandant très fort mais dont
     on ne possède aucune pièce n'aidera pas ce soir. Le nombre de decks
@@ -61,9 +65,14 @@ def list_commanders():
             "best_theme": {
                 "slug": theme["theme_slug"],
                 "label": theme["label"],
-                "coverage": round(theme["coverage"] or 0, 3),
-                "cards_owned": theme["owned"],
-                "cards_legal": theme["cards"],
+                # Poids de consensus des 63 meilleures cartes possédées : c'est
+                # lui qui classe, d'où son affichage — un tri sur un nombre
+                # invisible est un tri qu'on ne peut pas contester.
+                "consensus": round(float(theme["reachable"] or 0), 1),
+                "cards_usable": theme["owned_cards"],
+                # Part de l'optimum de cet archétype-là. À lire ensemble : 99 %
+                # d'une référence molle vaut moins que 93 % d'une référence forte.
+                "score": round(float(theme["score"] or 0), 3),
                 "deck_count": theme["deck_count"],
             } if theme else None,
         })
@@ -71,7 +80,7 @@ def list_commanders():
     # Sans archétype connu (synchronisation EDHREC jamais lancée), le
     # commandant passe en fin de liste plutôt que de disparaître.
     enriched.sort(key=lambda entry: (
-        -(entry["best_theme"]["coverage"] if entry["best_theme"] else -1),
+        -(entry["best_theme"]["consensus"] if entry["best_theme"] else -1),
         entry["name"],
     ))
     card_images.ensure_images(enriched)
