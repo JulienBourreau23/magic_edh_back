@@ -150,3 +150,61 @@ def build_pool(commander_oracle_id: str, theme_slug: str, format: str,
                  "identity": identity, "commander_oracle": commander_oracle_id},
             )
             return cur.fetchall()
+
+
+def best_theme_by_commander(format: str) -> dict[str, dict]:
+    """
+    Pour chaque commandant possédé, l'archétype que la collection couvre le
+    mieux — « celui que je peux monter tout de suite », qui n'a rien à voir avec
+    « celui qui est le plus joué ».
+
+    Une seule requête pour tous les commandants : la page en affiche une
+    trentaine, et trente allers-retours pour trier une grille serait absurde.
+    Les recommandations du commandant alimentent l'agrégat, les
+    recommandations de thème alimentent les autres — d'où l'union.
+    """
+    legality = LEGALITY_COLUMNS[format]
+    with get_conn() as conn:
+        with conn.cursor() as cur:
+            cur.execute(
+                f"""
+                WITH par_theme AS (
+                    SELECT t.commander_oracle_id, t.theme_slug,
+                           count(*) AS cards,
+                           count(col.oracle_id) AS owned
+                    FROM theme_recommendations t
+                    JOIN cards_cheapest c ON c.oracle_id = t.card_oracle_id
+                    LEFT JOIN collection col ON col.oracle_id = t.card_oracle_id
+                    WHERE c.{legality}
+                    GROUP BY 1, 2
+                  UNION ALL
+                    SELECT r.commander_oracle_id, %(all_slug)s,
+                           count(*),
+                           count(col.oracle_id)
+                    FROM (SELECT DISTINCT commander_oracle_id, card_oracle_id
+                          FROM commander_recommendations) r
+                    JOIN cards_cheapest c ON c.oracle_id = r.card_oracle_id
+                    LEFT JOIN collection col ON col.oracle_id = r.card_oracle_id
+                    WHERE c.{legality}
+                    GROUP BY 1
+                ),
+                classe AS (
+                    SELECT p.*, th.label, th.deck_count,
+                           p.owned::float / NULLIF(p.cards, 0) AS coverage,
+                           row_number() OVER (
+                               PARTITION BY p.commander_oracle_id
+                               ORDER BY p.owned::float / NULLIF(p.cards, 0) DESC NULLS LAST,
+                                        th.deck_count DESC NULLS LAST
+                           ) AS rang
+                    FROM par_theme p
+                    JOIN commander_themes th
+                      ON th.commander_oracle_id = p.commander_oracle_id
+                     AND th.slug = p.theme_slug
+                )
+                SELECT commander_oracle_id, theme_slug, label, deck_count,
+                       cards, owned, coverage
+                FROM classe WHERE rang = 1
+                """,
+                {"all_slug": ALL_THEMES_SLUG},
+            )
+            return {str(row["commander_oracle_id"]): dict(row) for row in cur.fetchall()}

@@ -36,10 +36,46 @@ def _commander(oracle_id: UUID) -> dict:
 
 @router.get("/commanders")
 def list_commanders():
-    """Étape 1 : les commandants présents dans la collection."""
+    """
+    Étape 1 : les commandants de la collection, **classés par ce qu'on peut en
+    tirer tout de suite** — l'archétype dont la collection couvre la plus
+    grande part, affiché avec eux.
+
+    Ce n'est pas un classement de puissance : un commandant très fort mais dont
+    on ne possède aucune pièce n'aidera pas ce soir. Le nombre de decks
+    recensés est montré à côté pour que le choix reste éclairé.
+
+    La couverture est calculée sur la banlist multijoueur, la plus large : le
+    format n'est choisi qu'à l'étape suivante, et la banlist Duel retire les
+    mêmes quelques dizaines de cartes à tout le monde — elle ne change pas
+    l'ordre.
+    """
     commanders = commanders_db.owned_commanders()
-    card_images.ensure_images(commanders)
-    return {"commanders": commanders}
+    best = themes_db.best_theme_by_commander("commander")
+
+    enriched = []
+    for commander in commanders:
+        theme = best.get(str(commander["oracle_id"]))
+        enriched.append({
+            **commander,
+            "best_theme": {
+                "slug": theme["theme_slug"],
+                "label": theme["label"],
+                "coverage": round(theme["coverage"] or 0, 3),
+                "cards_owned": theme["owned"],
+                "cards_legal": theme["cards"],
+                "deck_count": theme["deck_count"],
+            } if theme else None,
+        })
+
+    # Sans archétype connu (synchronisation EDHREC jamais lancée), le
+    # commandant passe en fin de liste plutôt que de disparaître.
+    enriched.sort(key=lambda entry: (
+        -(entry["best_theme"]["coverage"] if entry["best_theme"] else -1),
+        entry["name"],
+    ))
+    card_images.ensure_images(enriched)
+    return {"commanders": enriched}
 
 
 @router.get("/themes")
