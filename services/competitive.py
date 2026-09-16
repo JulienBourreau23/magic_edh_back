@@ -170,29 +170,56 @@ def land_package(pool: list[dict], slots: int, identity: list[str],
     }
 
 
-def upgrades(pool: list[dict], chosen: list[dict], max_price: float,
-             limit: int = 15) -> list[dict]:
+def _basic_occupant(name: str) -> dict:
+    """
+    Un terrain de base vu comme occupant d'un emplacement de manabase.
+
+    Il n'a ni prix ni taux d'inclusion : c'est ce qui en fait le plus mauvais
+    occupant possible, donc le premier à céder sa place à un terrain acheté.
+    """
+    return {"oracle_id": f"basic-{name}", "scryfall_id": None, "name": name,
+            "name_fr": name, "type_line": "Basic Land", "cmc": 0, "mana_cost": None,
+            "price_eur": None, "image_uri": None, "image_downloaded": False,
+            "categories": ["land"], "color_identity": [], "game_changer": False,
+            "edhrec_rank": None, "owned_quantity": 1, "theme_rate": 0.0,
+            "commander_rate": 0.0}
+
+
+def upgrades(pool: list[dict], chosen: list[dict], lands: dict, max_price: float,
+             limit: int = 20) -> list[dict]:
     """
     Les achats qui valent le coup, chacun **face à la carte qu'il remplace**.
 
-    Une carte non possédée n'a d'intérêt que si elle est plus jouée que la
-    moins bonne carte retenue **du même type** : sinon l'acheter ne rapproche
-    pas le deck des listes de référence, elle le déplace latéralement. Le
-    remplacement est donc désigné, pas laissé à deviner.
+    Une carte non possédée n'a d'intérêt que si elle est plus jouée que le plus
+    faible occupant de son emplacement : sinon l'acheter ne rapproche pas le
+    deck des listes de référence, elle le déplace latéralement. Le remplacement
+    est donc désigné, et chaque achat en évince **un** distinct — trois achats
+    qui remplacent la même carte feraient croire à trois gains.
+
+    **Les terrains comptent comme le reste.** Sur un deck de compétition
+    unique, la manabase est souvent le premier poste qui manque, et un terrain
+    à 93 % d'inclusion est un meilleur achat qu'une créature à 40 %. Les
+    emplacements de terrain sont occupés d'abord par des terrains de base, qui
+    ne valent rien au classement : ce sont eux qui cèdent leur place en premier,
+    et seulement ensuite les non-basiques les moins joués.
     """
-    # Les cartes retenues, du maillon le plus faible au plus fort, par type.
-    # Chaque achat évince **une** carte distincte : proposer trois achats qui
-    # remplacent tous la même carte ferait croire à trois gains alors qu'il n'y
-    # en a qu'un.
     by_type: dict[str, list[dict]] = {}
     for card in sorted(chosen, key=_rank, reverse=True):
         by_type.setdefault(_type_of(card) or "", []).append(card)
+
+    # Les occupants de la manabase, du plus faible au plus fort : les basiques,
+    # puis les non-basiques possédés en remontant.
+    occupants = [_basic_occupant(name)
+                 for name, count in lands.get("basics", {}).items()
+                 for _ in range(count)]
+    occupants += sorted(lands.get("nonbasic", []), key=_rank, reverse=True)
+    by_type["Land"] = occupants
 
     candidates = [
         card for card in pool
         if card["owned_quantity"] == 0
         and card not in chosen
-        and _type_of(card) != "Land"
+        and card not in lands.get("nonbasic", [])
         and card.get("price_eur") is not None
         and card["price_eur"] <= max_price
     ]
@@ -306,7 +333,7 @@ def build(commander: dict, theme_slug: str, format: str, max_price: float) -> di
         "upgrades": [
             {"buy": _summarize(item["buy"]), "replace": _summarize(item["replace"]),
              "price_eur": item["price_eur"]}
-            for item in upgrades(pool, chosen, max_price)
+            for item in upgrades(pool, chosen, lands, max_price)
         ],
         "pool_size": len(pool),
     }

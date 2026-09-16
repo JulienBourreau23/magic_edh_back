@@ -11,6 +11,10 @@ from services.competitive import (choose_nonlands, curve_of, land_package,
                                   upgrades, _type_of)
 
 
+# Une manabase vide : les tests qui ne parlent pas de terrains n'en ont pas.
+SANS_TERRAIN = {"nonbasic": [], "basics": {}}
+
+
 def carte(nom: str, *, type_line: str = "Creature — Phyrexian", cmc: int = 2,
           theme: float = 0.5, commander: float = 0.0, owned: int = 1,
           prix: float | None = 1.0, rang: int = 500) -> dict:
@@ -67,7 +71,7 @@ def test_chaque_achat_remplace_une_carte_differente():
     chosen = [carte(f"tiede{i}", theme=0.2) for i in range(3)]
     pool = chosen + [carte(f"mieux{i}", theme=0.8, owned=0, prix=5.0) for i in range(3)]
 
-    proposals = upgrades(pool, chosen, max_price=50)
+    proposals = upgrades(pool, chosen, SANS_TERRAIN, max_price=50)
     remplaces = [item["replace"]["name"] for item in proposals]
     assert len(remplaces) == len(set(remplaces)) == 3
 
@@ -79,7 +83,7 @@ def test_un_achat_hors_budget_ou_moins_joue_n_est_pas_propose():
         carte("moins_joue", theme=0.1, owned=0, prix=1.0),
         carte("sans_prix", theme=0.9, owned=0, prix=None),
     ]
-    assert upgrades(pool, chosen, max_price=50) == []
+    assert upgrades(pool, chosen, SANS_TERRAIN, max_price=50) == []
 
 
 def test_la_manabase_prend_les_terrains_possedes_puis_des_basiques():
@@ -94,3 +98,35 @@ def test_la_manabase_prend_les_terrains_possedes_puis_des_basiques():
     assert [land["name"] for land in plan["nonbasic"]] == ["Terrain utile"]
     assert plan["total"] == 36
     assert sum(plan["basics"].values()) == 35
+
+
+def test_un_terrain_s_achete_en_evincant_un_basique():
+    # Sur un deck de compétition, la manabase compte comme le reste : un
+    # terrain très joué vaut mieux qu'une Forêt, qui ne vaut rien au classement.
+    chosen = [carte("sort", theme=0.9)]
+    terrain = carte("Inkmoth Nexus", type_line="Land", cmc=0, owned=0, prix=8.31, theme=0.29)
+    lands = {"nonbasic": [], "basics": {"Forêt": 2}}
+
+    proposals = upgrades([*chosen, terrain], chosen, lands, max_price=50)
+
+    assert len(proposals) == 1
+    assert proposals[0]["buy"]["name"] == "Inkmoth Nexus"
+    assert proposals[0]["replace"]["name"] == "Forêt"
+
+
+def test_les_basiques_cedent_leur_place_avant_les_non_basiques():
+    # Ordre d'éviction : d'abord ce qui ne vaut rien, ensuite le moins joué.
+    faible = carte("Terrain médiocre", type_line="Land", cmc=0, owned=1, theme=0.05)
+    lands = {"nonbasic": [faible], "basics": {"Forêt": 1}}
+    achats = [carte("Terrain A", type_line="Land", cmc=0, owned=0, prix=5.0, theme=0.40),
+              carte("Terrain B", type_line="Land", cmc=0, owned=0, prix=5.0, theme=0.30)]
+
+    proposals = upgrades([*achats, faible], [], lands, max_price=50)
+
+    assert [item["replace"]["name"] for item in proposals] == ["Forêt", "Terrain médiocre"]
+
+
+def test_un_terrain_deja_dans_la_manabase_n_est_pas_a_racheter():
+    possede = carte("Terrain possédé", type_line="Land", cmc=0, owned=1, theme=0.5)
+    lands = {"nonbasic": [possede], "basics": {}}
+    assert upgrades([possede], [], lands, max_price=50) == []
