@@ -5,7 +5,7 @@ Debian 13 trixie, Python 3.13.5, 2 vCPU / 2 Go / 17 Go.
 ## Étapes root (une seule fois)
 
 ```bash
-sudo apt install -y git python3-venv postgresql-client
+sudo apt install -y git python3-venv postgresql-client poppler-utils
 
 # Le dossier créé s'appelait « mgt-back » (faute de frappe pour « mtg »).
 sudo mv /opt/mgt-back /opt/mtg-back
@@ -21,7 +21,7 @@ git clone https://github.com/JulienBourreau23/magic_edh_back.git /opt/mtg-back/m
 cd /opt/mtg-back/magic_edh_back
 python3 -m venv venv
 venv/bin/pip install -r requirements.txt
-venv/bin/python -m pytest -q          # 83 tests doivent passer
+venv/bin/python -m pytest -q          # 95 tests doivent passer
 ```
 
 ## `.env`
