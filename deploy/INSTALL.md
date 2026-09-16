@@ -21,7 +21,7 @@ git clone https://github.com/JulienBourreau23/magic_edh_back.git /opt/mtg-back/m
 cd /opt/mtg-back/magic_edh_back
 python3 -m venv venv
 venv/bin/pip install -r requirements.txt
-venv/bin/python -m pytest -q          # 77 tests doivent passer
+venv/bin/python -m pytest -q          # 83 tests doivent passer
 ```
 
 ## `.env`
@@ -38,12 +38,18 @@ Le mot de passe en clair n'est stocké nulle part.
 ## Migrations
 
 Les `scripts/migration_0*.sql` sont à rejouer dans l'ordre sur une base
-existante. La dernière, `migration_010_combos.sql`, crée la table `combos` :
+existante. Les deux dernières :
 
 ```bash
 psql -h 192.168.1.104 -U julien -d magic_edh -f scripts/migration_010_combos.sql
-venv/bin/python scripts/sync_combos.py
+venv/bin/python scripts/sync_combos.py            # remplit la table `combos`
+psql -h 192.168.1.104 -U julien -d magic_edh -f scripts/migration_011_normalize_names.sql
 ```
+
+`migration_011` crée `normalize_card_name()`, dont dépend la résolution des
+noms : **six tests échouent en `skip` tant qu'elle n'est pas jouée**, et les
+decklists françaises accentuées repartent au repli flou. Elle ne touche aucune
+donnée, elle est rejouable.
 
 **Une migration doit laisser ses tables au rôle applicatif** (celui du `.env`),
 pas au compte qui l'a jouée : sinon l'application ne peut ni écrire ni tronquer

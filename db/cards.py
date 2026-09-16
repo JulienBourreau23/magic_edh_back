@@ -14,13 +14,22 @@ MAX_EDHREC_RANK = 2000
 
 def resolve_names(names: list[str]) -> dict[str, dict]:
     """
-    Résout une liste de noms en deux allers-retours SQL (match exact,
-    insensible à la casse) : d'abord les noms anglais, puis les noms français
-    pour ce qui reste. Renvoie {nom_normalisé: carte}. Les noms non trouvés
-    sont simplement absents — à l'appelant de tenter le flou.
+    Résout une liste de noms en allers-retours SQL successifs, du plus strict
+    au plus tolérant : noms anglais exacts, puis noms français exacts, puis les
+    deux en comparaison **insensible aux accents et aux ligatures**. Renvoie
+    {nom de la requête en minuscules: carte}. Les noms non trouvés sont
+    simplement absents — à l'appelant de tenter le flou.
 
     L'anglais est prioritaire : c'est le nom canonique, et un nom français peut
     théoriquement coïncider avec le nom anglais d'une autre carte.
+
+    Le passage normalisé existe parce que les noms français de Scryfall ne sont
+    pas homogènes : « Ile » sans accent pour l'île de base, « Nécropède » avec,
+    « Nuée de fÆries » avec ligature quand « Annonciatrice faerie » n'en a pas.
+    Sans lui, l'orthographe qui marche change d'une carte à l'autre. Il ne
+    tourne que sur le reliquat des deux premiers passages — en général quelques
+    lignes — donc son balayage de `cards_cheapest` se paie une fois par import,
+    pas une fois par carte.
     """
     if not names:
         return {}
@@ -47,6 +56,46 @@ def resolve_names(names: list[str]) -> dict[str, dict]:
                 FROM unnest(%s::text[]) AS q(name)
                 JOIN card_names_fr fr ON lower(fr.printed_name) = lower(q.name)
                 JOIN cards_cheapest c ON c.oracle_id = fr.oracle_id
+                """,
+                (remaining,),
+            )
+            for row in cur.fetchall():
+                resolved.setdefault(row["match_key"], row)
+
+            remaining = [name for name in names if name.lower() not in resolved]
+            if not remaining:
+                return resolved
+
+            # Troisième passage : accents et ligatures neutralisés des deux
+            # côtés. La clé renvoyée est le nom **demandé**, pas celui trouvé :
+            # c'est par lui que l'appelant retrouve sa ligne de decklist.
+            # `ORDER BY` pour que deux cartes qui ne diffèrent que par un accent
+            # — cas théorique — donnent toujours la même réponse.
+            cur.execute(
+                """
+                SELECT DISTINCT ON (lower(q.name)) lower(q.name) AS match_key, c.*
+                FROM unnest(%s::text[]) AS q(name)
+                JOIN cards_cheapest c
+                  ON normalize_card_name(c.name) = normalize_card_name(q.name)
+                ORDER BY lower(q.name), c.name
+                """,
+                (remaining,),
+            )
+            for row in cur.fetchall():
+                resolved.setdefault(row["match_key"], row)
+
+            remaining = [name for name in names if name.lower() not in resolved]
+            if not remaining:
+                return resolved
+
+            cur.execute(
+                """
+                SELECT DISTINCT ON (lower(q.name)) lower(q.name) AS match_key, c.*
+                FROM unnest(%s::text[]) AS q(name)
+                JOIN card_names_fr fr
+                  ON normalize_card_name(fr.printed_name) = normalize_card_name(q.name)
+                JOIN cards_cheapest c ON c.oracle_id = fr.oracle_id
+                ORDER BY lower(q.name), c.name
                 """,
                 (remaining,),
             )
