@@ -28,7 +28,9 @@ Deux choses le sont moins, et c'est assumé :
   côté, chacun face à la carte qu'il remplacerait : un deck qu'on ne peut pas
   jouer ce soir n'est pas un deck.
 """
+import db.commanders as commanders_db
 import db.themes as themes_db
+from services import combos as combos_service
 from services import mana
 
 # Repères de repli quand EDHREC n'a pas de profil pour le thème (thème récent,
@@ -318,7 +320,28 @@ def build(commander: dict, theme_slug: str, format: str, max_price: float) -> di
     achieved = curve_of(chosen)
     owned_count = sum(1 for card in chosen if card["owned_quantity"] > 0)
 
+    # Le deck construit est une liste de cartes comme une autre : combos et
+    # synergies se calculent dessus exactement comme sur une fiche de deck.
+    # Le commandant en fait partie — un combo dont il est une moitié compte.
+    liste = [{"oracle_id": commander["oracle_id"], "name": commander["name"],
+              "cmc": commander.get("cmc"), "name_fr": commander.get("name_fr")}]
+    liste += [{"oracle_id": c["oracle_id"], "name": c["name"],
+               "cmc": c.get("cmc"), "name_fr": c.get("name_fr")} for c in chosen]
+    liste += [{"oracle_id": c["oracle_id"], "name": c["name"],
+               "cmc": c.get("cmc"), "name_fr": c.get("name_fr")} for c in lands["nonbasic"]]
+
+    # Synergie mesurée **contre l'archétype** et non contre l'ensemble des decks
+    # du commandant : ce deck est bâti pour cette stratégie-là, et une carte
+    # peut être décisive en infect et inutile en superfriends.
+    synergies = commanders_db.synergies_for_deck(
+        commander_oracle_id,
+        [str(c["oracle_id"]) for c in chosen],
+        theme_slug=theme["slug"],
+    )
+
     return {
+        "combos": combos_service.find_in_deck(liste),
+        "synergies": synergies,
         "commander": _summarize({**commander, "owned_quantity": 1,
                                  "theme_rate": 1.0, "commander_rate": 1.0}),
         "theme": {"slug": theme["slug"], "label": theme["label"],

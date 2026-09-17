@@ -928,6 +928,20 @@ La liste est **vide** quand le commandant n'a pas de données EDHREC — il n'es
 pas dans la collection, ou la synchro n'a pas tourné — et l'interface masque
 alors la section plutôt que d'afficher un tableau vide.
 
+**Les trois écrans qui produisent une decklist l'affichent** : la fiche de deck,
+la decklist proposée (`/deck-ideas/[id]`) et le deck compétitif. Un seul
+composant (`CombosAndSynergies`) et une seule requête les servent — les trois
+posent la même question et méritent la même mise en garde, et la dupliquer
+laisserait les explications diverger.
+
+**Une nuance sépare pourtant le compétitif des deux autres : la synergie y est
+mesurée contre l'archétype**, pas contre l'ensemble des decks du commandant
+(`theme_recommendations` au lieu de `commander_recommendations`). Ce deck est
+bâti *pour* une stratégie, et une carte peut être décisive en infect et inutile
+en superfriends. Vérifié sur l'Atraxa : en thème Infect, les meilleures
+synergies sont Prologue to Phyresis et Infectious Inquiry, qui ne remonteraient
+pas dans un classement tous decks confondus.
+
 
 ### Essayer un archétype sans acheter (`/deck-ideas/[id]`)
 

@@ -11,6 +11,7 @@ terrains de base, les compter fausserait à la fois la couverture et le budget.
 L'exclusion porte sur **tous** les terrains, pas seulement les basiques.
 """
 import db.commanders as commanders_db
+from services import combos as combos_service
 from services.suggestions import DEFAULT_MAX_PRICE_EUR
 
 # Un deck Commander, c'est 99 cartes dont ~36 terrains. On vise donc un noyau
@@ -116,7 +117,21 @@ def deck_idea_detail(commander_oracle_id: str, max_price: float = DEFAULT_MAX_PR
     exclude = [str(commander["oracle_id"])] + [str(card["oracle_id"]) for card in core]
     substitutes = commanders_db.owned_pool(commander["color_identity"], exclude, format)
 
+    # Le noyau proposé est une liste de cartes : combos et synergies s'y
+    # calculent comme sur une fiche de deck. Le commandant en fait partie, un
+    # combo dont il est une moitié comptant autant qu'un autre.
+    liste = [{"oracle_id": commander["oracle_id"], "name": commander["name"],
+              "cmc": commander.get("cmc"), "name_fr": commander.get("name_fr")}]
+    liste += [{"oracle_id": c["oracle_id"], "name": c["name"],
+               "cmc": c.get("cmc"), "name_fr": c.get("name_fr")} for c in core]
+
     return {
+        "combos": combos_service.find_in_deck(liste),
+        # Pas de thème ici : cette liste est l'agrégat de ce qui se joue avec le
+        # commandant, pas une stratégie choisie. La synergie se mesure donc
+        # contre l'ensemble de ses decks.
+        "synergies": commanders_db.synergies_for_deck(
+            str(commander["oracle_id"]), [str(c["oracle_id"]) for c in core]),
         "commander": {
             "oracle_id": commander["oracle_id"],
             "scryfall_id": commander["scryfall_id"],

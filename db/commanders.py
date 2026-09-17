@@ -190,7 +190,8 @@ def owned_pool(identity: list[str], exclude_oracle_ids: list[str],
             return cur.fetchall()
 
 
-def synergies_for_deck(commander_oracle_id: str, oracle_ids: list[str]) -> list[dict]:
+def synergies_for_deck(commander_oracle_id: str, oracle_ids: list[str],
+                       theme_slug: str | None = None) -> list[dict]:
     """
     Les cartes du deck qu'EDHREC voit **particulièrement** associées à ce
     commandant, la plus synergique d'abord.
@@ -204,23 +205,50 @@ def synergies_for_deck(commander_oracle_id: str, oracle_ids: list[str]) -> list[
     Les valeurs négatives sont conservées : une carte moins jouée ici
     qu'ailleurs est une information, pas une erreur — c'est souvent le signe
     qu'elle n'est pas à sa place.
+
+    `theme_slug` bascule la mesure sur l'archétype plutôt que sur le commandant
+    entier. La nuance compte pour un deck construit *pour* une stratégie : une
+    carte peut être très synergique avec l'Atraxa infect et sans intérêt pour
+    l'Atraxa superfriends. Sans thème, on mesure contre l'ensemble des decks du
+    commandant, ce qui est la bonne question pour une liste déjà montée.
     """
     if not oracle_ids:
         return []
+
+    if theme_slug:
+        source = """
+            FROM theme_recommendations r
+            JOIN cards_cheapest c ON c.oracle_id = r.card_oracle_id
+            LEFT JOIN card_names_fr fr ON fr.oracle_id = c.oracle_id
+            WHERE r.commander_oracle_id = %(commander)s
+              AND r.theme_slug = %(theme)s
+              AND r.card_oracle_id = ANY(%(cards)s::uuid[])
+        """
+    else:
+        source = """
+            FROM commander_recommendations r
+            JOIN cards_cheapest c ON c.oracle_id = r.card_oracle_id
+            LEFT JOIN card_names_fr fr ON fr.oracle_id = c.oracle_id
+            WHERE r.commander_oracle_id = %(commander)s
+              AND r.card_oracle_id = ANY(%(cards)s::uuid[])
+        """
+
     with get_conn() as conn:
         with conn.cursor() as cur:
             cur.execute(
-                """
-                SELECT c.oracle_id, c.scryfall_id, c.name, fr.printed_name AS name_fr,
+                f"""
+                SELECT DISTINCT ON (c.oracle_id)
+                       c.oracle_id, c.scryfall_id, c.name, fr.printed_name AS name_fr,
                        c.type_line, c.mana_cost, c.image_uri, c.image_downloaded,
                        r.synergy, r.inclusion_rate, r.section
-                FROM commander_recommendations r
-                JOIN cards_cheapest c ON c.oracle_id = r.card_oracle_id
-                LEFT JOIN card_names_fr fr ON fr.oracle_id = c.oracle_id
-                WHERE r.commander_oracle_id = %(commander)s
-                  AND r.card_oracle_id = ANY(%(cards)s::uuid[])
-                ORDER BY r.synergy DESC NULLS LAST
+                {source}
+                ORDER BY c.oracle_id, r.synergy DESC NULLS LAST
                 """,
-                {"commander": commander_oracle_id, "cards": oracle_ids},
+                {"commander": commander_oracle_id, "cards": oracle_ids, "theme": theme_slug},
             )
-            return cur.fetchall()
+            rows = cur.fetchall()
+
+    # Le `DISTINCT ON` impose de trier par carte : le classement par synergie se
+    # refait donc ici, une fois les doublons de section écartés.
+    rows.sort(key=lambda row: row["synergy"] if row["synergy"] is not None else -99, reverse=True)
+    return rows
