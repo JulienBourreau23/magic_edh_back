@@ -31,7 +31,9 @@ def _deck_oracle_ids(cards: list[dict]) -> list[str]:
     return [card["oracle_id"] for card in cards]
 
 
-CARD_SUMMARY_FIELDS = ("scryfall_id", "name", "name_fr", "price_eur",
+# `oracle_id` en fait partie depuis que les conseils sont refusables : c'est la
+# clé du refus, et le front ne peut pas l'inventer.
+CARD_SUMMARY_FIELDS = ("scryfall_id", "oracle_id", "name", "name_fr", "price_eur",
                        "image_uri", "image_downloaded")
 
 
@@ -115,7 +117,7 @@ def cuts_for_bracket(cards: list[dict], target_bracket: int,
     ordered = sorted(game_changers, key=lambda c: c.get("edhrec_rank") or 10**9, reverse=True)
     return [
         {
-            "card": {k: card[k] for k in ("scryfall_id", "name", "name_fr", "price_eur", "image_uri", "image_downloaded")},
+            "card": {k: card[k] for k in CARD_SUMMARY_FIELDS},
             "reason": f"Game Changer : en retirer {surplus} pour viser le bracket {target_bracket}",
         }
         for card in ordered[:surplus]
@@ -134,7 +136,7 @@ def _cuts_for_surplus(cards: list[dict], diagnostics: list[dict]) -> list[dict]:
         ordered = sorted(in_role, key=lambda c: c.get("edhrec_rank") or 10**9, reverse=True)
         for card in ordered[:diagnostic["gap"]]:
             cuts.append({
-                "card": {k: card[k] for k in ("scryfall_id", "name", "name_fr", "price_eur", "image_uri", "image_downloaded")},
+                "card": {k: card[k] for k in CARD_SUMMARY_FIELDS},
                 "reason": f"{ROLE_LABELS.get(role, role)} en excédent ({diagnostic['count']} pour {diagnostic['target']})",
             })
     return cuts
@@ -143,7 +145,14 @@ def _cuts_for_surplus(cards: list[dict], diagnostics: list[dict]) -> list[dict]:
 def suggest(cards: list[dict], format: str = "commander",
             max_price: float = DEFAULT_MAX_PRICE_EUR,
             target_bracket: int | None = None,
-            combos: list[dict] | None = None) -> dict:
+            combos: list[dict] | None = None,
+            ignored_oracle_ids: list[str] | None = None) -> dict:
+    """
+    `ignored_oracle_ids` : les cartes refusées pour ce deck. Elles sortent des
+    deux sens du conseil — ni proposées à l'ajout, ni proposées au retrait. Le
+    même identifiant ne peut pas signifier les deux à la fois : une carte est
+    dans le deck ou elle n'y est pas, donc le refus est sans ambiguïté.
+    """
     identity = deck_analysis.commander_identity(cards)
     if identity is None:
         return {
@@ -153,7 +162,10 @@ def suggest(cards: list[dict], format: str = "commander",
 
     diagnostics = deck_analysis.role_diagnostics(cards)
     mana = deck_analysis.manabase(cards, deep=True)
-    exclude = _deck_oracle_ids(cards)
+    ignored = {str(oracle_id) for oracle_id in (ignored_oracle_ids or [])}
+    # Une carte refusée est exclue comme si elle était déjà dans le deck : le
+    # filtre existait, il suffit de l'élargir.
+    exclude = _deck_oracle_ids(cards) + list(ignored)
     # Si on cherche à contenir le bracket, inutile de proposer des cartes qui
     # le feraient remonter aussitôt.
     exclude_game_changers = target_bracket is not None and target_bracket <= 3
@@ -193,6 +205,7 @@ def suggest(cards: list[dict], format: str = "commander",
     to_cut = _cuts_for_surplus(cards, diagnostics)
     if target_bracket is not None:
         to_cut = cuts_for_bracket(cards, target_bracket, combos) + to_cut
+    to_cut = [cut for cut in to_cut if str(cut["card"]["oracle_id"]) not in ignored]
 
     return {
         "format": format,
@@ -202,4 +215,5 @@ def suggest(cards: list[dict], format: str = "commander",
         "manabase": mana,
         "to_add": to_add,
         "to_cut": to_cut,
+        "ignored_count": len(ignored),
     }

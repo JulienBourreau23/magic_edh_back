@@ -21,7 +21,7 @@ git clone https://github.com/JulienBourreau23/magic_edh_back.git /opt/mtg-back/m
 cd /opt/mtg-back/magic_edh_back
 python3 -m venv venv
 venv/bin/pip install -r requirements.txt
-venv/bin/python -m pytest -q          # 144 tests doivent passer
+venv/bin/python -m pytest -q          # 169 tests doivent passer
 ```
 
 ## `.env`
@@ -38,7 +38,7 @@ Le mot de passe en clair n'est stocké nulle part.
 ## Migrations
 
 Les `scripts/migration_0*.sql` sont à rejouer dans l'ordre sur une base
-existante. Les deux dernières :
+existante. Celles qui ont suivi le transfert initial :
 
 ```bash
 psql -h 192.168.1.104 -U julien -d magic_edh -f scripts/migration_010_combos.sql
@@ -46,6 +46,7 @@ venv/bin/python scripts/sync_combos.py            # remplit la table `combos`
 psql -h 192.168.1.104 -U julien -d magic_edh -f scripts/migration_011_normalize_names.sql
 psql -h 192.168.1.104 -U julien -d magic_edh -f scripts/migration_012_themes.sql
 psql -h 192.168.1.104 -U julien -d magic_edh -f scripts/migration_013_wishlist.sql
+psql -h 192.168.1.104 -U julien -d magic_edh -f scripts/migration_014_ignored_cards.sql
 ```
 
 `migration_011` crée `normalize_card_name()`, dont dépend la résolution des

@@ -773,6 +773,48 @@ que ce qui est à l'écran. C'est ce qui rend le mode visuel gratuit — il
 n'aurait pas été tenable en chargement imposé.
 
 
+## Refuser un conseil (`deck_ignored_cards`)
+
+« Ne me propose plus cette carte pour ce deck. » Deux endroits l'offrent, et ce
+sont exactement ceux qui **modifient un deck existant** : les suggestions
+(`/decks/[id]/suggestions`) et l'équilibrage (`/balance`). Les écrans qui
+*construisent* un deck de zéro — `/deck-plans`, `/competitive`, `/deck-ideas` —
+n'ont pas de deck sur lequel accrocher un refus et ne sont pas concernés.
+
+**Le refus est rattaché au deck, pas global.** Refuser Rhystic Study pour
+l'Atraxa ne dit rien du Kykar, et une ignorance globale irait masquer des cartes
+sur les écrans ci-dessus, dont ce n'était pas le sujet. Une seconde table
+globale reste possible si le besoin apparaît : le filtre est déjà posé.
+
+Trois propriétés qui ne se devinent pas :
+
+- **Le refus ne retire rien du deck** et ne change aucune quantité. Il ne parle
+  que du conseil. Une carte refusée reste jouée si elle l'était.
+- **Il vaut dans les deux sens** : ni proposée à l'ajout, ni proposée au
+  retrait. Le même identifiant ne peut pas signifier les deux à la fois — une
+  carte est dans le deck ou elle n'y est pas — donc il n'y a pas d'ambiguïté.
+  C'est ce qui permet au bouton « je la garde » d'un retrait conseillé et au
+  bouton « ignorer » d'un ajout conseillé de partager la même table.
+- **Il est idempotent**, contrairement à la collection et à la liste de
+  recherche où les quantités s'additionnent. Refuser deux fois ne double rien.
+
+**Le filtre tient en une ligne parce que le point d'entrée est unique** : les
+deux écrans passent par `cards_db.find_candidates`, dont le paramètre
+`exclude_oracle_ids` servait déjà à écarter les cartes présentes dans le deck.
+Les refus s'y ajoutent. Si un troisième écran de modification apparaît, c'est le
+seul endroit à ne pas oublier.
+
+**La liste des refus voyage avec les conseils** (`ignored` dans la réponse des
+suggestions) et s'annule d'un bouton. Ce n'est pas du confort : une liste
+invisible serait un piège, et dans six mois plus rien n'expliquerait pourquoi
+une carte ne remonte jamais. La page d'équilibrage, qui n'affiche pas cette
+liste, renvoie explicitement vers les suggestions du deck.
+
+Refuser relance le calcul côté client, là où `/must-have` se contente d'une mise
+à jour locale : écarter une carte doit laisser une autre prendre sa place, et
+seul le moteur peut la désigner.
+
+
 ## Reste à faire
 
 **Déployé et planifié.** DB (`lxc-pg18`, 192.168.1.104), back (`lxc-mtg-back`,

@@ -14,6 +14,7 @@ Les exemplaires possédés sont réservés au fur et à mesure : une carte propo
 au premier deck n'est plus proposée gratuitement au suivant.
 """
 import db.cards as cards_db
+import db.ignored as ignored_db
 from services import card_categories as categories
 from services import deck_analysis, suggestions
 from services.allocation import allocate
@@ -28,7 +29,8 @@ def _exhausted(available: dict[str, int]) -> list[str]:
 
 
 def _adds_for_deck(cards: list[dict], format: str, max_price: float,
-                   available: dict[str, int], target_bracket: int) -> list[dict]:
+                   available: dict[str, int], target_bracket: int,
+                   ignored: list[str] | None = None) -> list[dict]:
     """
     Comble les manques de rôle, gratuitement si possible. `available` = les
     exemplaires encore libres par `oracle_id`, décrémenté au fur et à mesure :
@@ -39,7 +41,9 @@ def _adds_for_deck(cards: list[dict], format: str, max_price: float,
     if identity is None:
         return []
 
-    exclude = [card["oracle_id"] for card in cards]
+    # Les cartes refusées pour ce deck sortent comme si elles y étaient déjà :
+    # le filtre existait, il suffit de l'élargir.
+    exclude = [card["oracle_id"] for card in cards] + list(ignored or [])
     groups = []
 
     deficits = [d for d in deck_analysis.role_diagnostics(cards) if d["status"] == "insuffisant"]
@@ -102,6 +106,9 @@ def balance(deck_entries: list[tuple[dict, list[dict]]], owned: dict[str, int],
     available = allocation.pop("remaining_copies")
 
     combos_by_deck = combos_by_deck or {}
+    # Une seule requête pour les quatre decks : les interroger un par un ferait
+    # quatre allers-retours pour rien.
+    ignored_by_deck = ignored_db.by_deck([deck["id"] for deck, _ in deck_entries])
     brackets = {
         deck["id"]: deck_analysis.bracket_estimate(cards, combos_by_deck.get(deck["id"]))
         for deck, cards in deck_entries
@@ -112,9 +119,11 @@ def balance(deck_entries: list[tuple[dict, list[dict]]], owned: dict[str, int],
     plans = []
     for deck, cards in deck_entries:
         bracket = brackets[deck["id"]]
+        ignored = ignored_by_deck.get(deck["id"], [])
         cuts = (suggestions.cuts_for_bracket(cards, target, combos_by_deck.get(deck["id"]))
                 if bracket["min"] > target else [])
-        adds = _adds_for_deck(cards, deck["format"], max_price, available, target)
+        cuts = [cut for cut in cuts if str(cut["card"]["oracle_id"]) not in set(ignored)]
+        adds = _adds_for_deck(cards, deck["format"], max_price, available, target, ignored)
 
         purchases = [
             candidate

@@ -1,9 +1,11 @@
 from typing import Literal
+from uuid import UUID
 
 from fastapi import APIRouter, HTTPException, Query
 from pydantic import BaseModel, Field
 
 import db.decks as decks_db
+import db.ignored as ignored_db
 import services.card_images as card_images
 from services import combos, deck_analysis, simulation, suggestions
 from services.decklist_parser import import_decklist
@@ -126,8 +128,42 @@ def deck_suggestions(deck_id: int,
                      target_bracket: int | None = Query(default=None, ge=1, le=5)):
     deck = _load_deck(deck_id)
     cards = decks_db.get_deck_cards(deck_id)
+    ignored = ignored_db.oracle_ids(deck_id)
     result = suggestions.suggest(cards, deck["format"], max_price, target_bracket,
-                                 combos.find_in_deck(cards))
+                                 combos.find_in_deck(cards), ignored)
     for group in result.get("to_add", []):
         card_images.ensure_images(group["candidates"])
+
+    # La liste des refus voyage avec les conseils : c'est le seul écran d'où
+    # on peut les annuler, et une liste invisible serait un piège — dans six
+    # mois, plus moyen de savoir pourquoi une carte ne remonte jamais.
+    ignored_cards = ignored_db.list_for_deck(deck_id)
+    card_images.ensure_images(ignored_cards)
+    result["ignored"] = ignored_cards
     return result
+
+
+class IgnoreCardRequest(BaseModel):
+    oracle_id: UUID
+    reason: str | None = None
+
+
+@router.post("/{deck_id}/ignored")
+def ignore_card(deck_id: int, payload: IgnoreCardRequest):
+    """
+    « Ne me propose plus cette carte pour ce deck. »
+
+    Le refus ne retire rien du deck et ne change aucune quantité : il ne parle
+    que du conseil. Il est aussi idempotent, contrairement aux ajouts en
+    collection ou en liste de recherche où les quantités s'additionnent.
+    """
+    _load_deck(deck_id)
+    ignored_db.add(deck_id, str(payload.oracle_id), payload.reason)
+    return {"status": "ok"}
+
+
+@router.delete("/{deck_id}/ignored/{oracle_id}", status_code=204)
+def unignore_card(deck_id: int, oracle_id: UUID):
+    _load_deck(deck_id)
+    if not ignored_db.remove(deck_id, str(oracle_id)):
+        raise HTTPException(404, "Cette carte n'était pas refusée pour ce deck")
