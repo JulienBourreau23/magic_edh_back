@@ -109,3 +109,26 @@ def test_le_classement_suit_la_popularite(liste):
     for group in liste["groups"]:
         rangs = [c["edhrec_rank"] for c in group["cards"]]
         assert rangs == sorted(rangs), group["label"]
+
+
+def test_ce_qui_est_deja_cherche_est_signale():
+    """
+    Sans ce champ, la page laisserait ajouter deux fois la même carte à la
+    liste de recherche : les quantités s'additionnent, donc le second clic
+    demanderait un second exemplaire sans que rien ne l'indique.
+    """
+    import db.wishlist as wishlist_db
+
+    cible = next(c for c in _toutes_les_cartes(must_have()) if c["wanted"] == 0)
+    oracle_id = str(cible["oracle_id"])
+
+    wishlist_db.add([(oracle_id, cible["scryfall_id"], 1, "test")])
+    try:
+        apres = {c["oracle_id"]: c["wanted"] for c in _toutes_les_cartes(must_have())}
+        assert apres[cible["oracle_id"]] == 1
+    finally:
+        wishlist_db.set_quantity(oracle_id, 0)
+
+    # Et l'état revient bien à zéro une fois la carte retirée.
+    rendu = {c["oracle_id"]: c["wanted"] for c in _toutes_les_cartes(must_have())}
+    assert rendu[cible["oracle_id"]] == 0

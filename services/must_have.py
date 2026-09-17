@@ -20,6 +20,11 @@ Trois conséquences de cette intention :
 - **Une carte sans prix connu n'est jamais proposée à l'achat**, conformément à
   la règle du projet : `price_eur` nul est « prix inconnu », pas « gratuit ».
 
+`wanted` accompagne `owned` pour la même raison : la page laisse ajouter une
+carte à la collection ou à la liste de recherche d'un clic, et les quantités
+**s'additionnent** dans les deux tables. Sans savoir ce qui y est déjà, un
+second clic demanderait un second exemplaire sans rien dire.
+
 Le classement est `edhrec_rank`, c'est-à-dire la popularité mesurée par EDHREC,
 qui arrive avec `sync_scryfall`. **Aucune table à entretenir, donc aucun flow
 d'ordonnancement propre à cette page** : la liste se met à jour toute seule au
@@ -58,10 +63,12 @@ _SELECT = """
     SELECT c.oracle_id, c.scryfall_id, c.name, fr.printed_name AS name_fr,
            c.type_line, c.mana_cost, c.cmc, c.price_eur, c.edhrec_rank,
            c.image_uri, c.image_downloaded, c.color_identity,
-           COALESCE(col.quantity, 0) AS owned
+           COALESCE(col.quantity, 0) AS owned,
+           COALESCE(w.quantity, 0) AS wanted
     FROM cards_cheapest c
     LEFT JOIN card_names_fr fr ON fr.oracle_id = c.oracle_id
     LEFT JOIN collection col ON col.oracle_id = c.oracle_id
+    LEFT JOIN wishlist w ON w.oracle_id = c.oracle_id
     WHERE c.edhrec_rank IS NOT NULL
       AND {legality}
       AND c.type_line ILIKE %(match)s

@@ -736,6 +736,28 @@ format (`commander` / `duel`) change la banlist appliquée — Sol Ring domine l
 artefacts en multijoueur et disparaît en duel, où des cartes moins jouées
 prennent sa place. Les deux listes ne s'emboîtent donc pas, un test le fige.
 
+**Deux boutons par carte** — « + collection » et « + recherche » — pour remplir
+l'une ou l'autre au fil de la lecture. C'est le chemin naturel quand la
+collection a été alimentée par les decks cochés « déjà monté » et non saisie
+carte par carte : beaucoup de choses marquées « à acheter » sont en fait déjà
+dans les boîtes.
+
+Deux précautions, parce que les quantités **s'additionnent** dans les deux
+tables :
+
+- La réponse porte `wanted` à côté de `owned`. Sans afficher ce qui est déjà
+  dans la liste de recherche, un second clic demanderait un second exemplaire
+  sans rien dire.
+- Le bouton est désactivé pendant l'envoi, ce qui neutralise le double-clic.
+
+L'ajout **met la liste à jour localement** plutôt que de la recharger : la page
+fait seize requêtes SQL, et on ajoute des cartes à la chaîne. La mise à jour
+parcourt tous les groupes, parce qu'une même carte figure dans plusieurs types
+(Solemn Simulacrum est dans les artefacts *et* dans les créatures) et que n'en
+marquer qu'un laisserait l'autre affirmer le contraire. Les compteurs d'en-tête
+sont recalculés à l'affichage pour la même raison — ceux du serveur seraient
+périmés dès le premier clic.
+
 La page a **deux affichages**, visuels par défaut et liste au choix, comme la
 collection : sur une liste d'achats, beaucoup de cartes sont inconnues et une
 illustration les fait reconnaître plus vite qu'un nom, mais comparer des prix
