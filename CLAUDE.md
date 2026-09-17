@@ -59,7 +59,8 @@ backend/
 │   ├── decks.py                 # import, CRUD, simulation, suggestions
 │   ├── cards.py                 # recherche
 │   ├── deck_plans.py            # plan de 4 decks à monter
-│   └── matchup.py               # comparaison de deux decks
+│   ├── matchup.py               # comparaison de deux decks
+│   └── must_have.py             # cartes à avoir, par type
 ├── services/
 │   ├── mana.py                  # coût de mana + castabilité (couplage biparti)
 │   ├── card_categories.py       # classification (ramp, draw, removal...)
@@ -269,6 +270,7 @@ app/
 ├── collection/page.tsx              # saisie en masse + à l'unité, quantités
 ├── balance/page.tsx                 # équilibrage de 4 decks + liste d'achats PDF
 ├── deck-plans/page.tsx              # comparaison par commandant + 4 decks à monter + PDF
+├── must-have/page.tsx               # cartes les plus jouées par type, sous plafond
 └── matchup/page.tsx                 # comparaison de deux decks
 components/  CardTile, CardSearch, DeckToolbar, ImportIssuesPanel, ManaCurveChart
 lib/api.ts                            # tous les appels au back + types
@@ -599,6 +601,53 @@ Deux choix qui ne sont pas des détails :
 Le remplissage relâche ses contraintes dans un ordre fixe — d'abord la courbe,
 puis les quotas de type — parce qu'un deck de 99 cartes vaut mieux qu'un deck
 de 84 parfaitement galbé.
+
+## Cartes à avoir (`/must-have`)
+
+**Ce n'est pas un palmarès, c'est une liste d'achats de long terme.** La
+question n'est pas « quelles sont les meilleures cartes du format » mais
+« qu'est-ce que je gagnerais à acheter, au fil du temps, sans dépasser mon
+plafond ». Cette intention décide de tout le reste :
+
+- **Le filtre de prix change la physionomie du classement, et c'est assumé.**
+  Une carte à 400 € n'est pas une information manquante ici : elle ne sera
+  jamais achetée. En contrepartie, le nombre de cartes écartées est renvoyé
+  (`over_budget`) et affiché, pour que la liste ne se fasse pas passer pour un
+  classement complet. Mesuré sur la collection actuelle : à 50 €, six cartes
+  seulement sur 366 sont écartées — le haut du classement est massivement fait
+  de pièces à moins d'un euro.
+- **Les cartes possédées restent, quel que soit leur prix**, grisées. Le
+  plafond ne concerne que les achats, comme partout ailleurs.
+- **Une carte sans `price_eur` n'est jamais proposée** : prix inconnu n'est pas
+  prix nul.
+
+Le classement est `edhrec_rank`, qui arrive avec `sync_scryfall`. **Il n'y a
+donc aucune table à entretenir et aucun flow Kestra propre à cette page** : la
+liste se met à jour toute seule au rythme mensuel du flow `sync-scryfall`. Il
+n'en faudrait un que pour changer de source — les pages *top cards* d'EDHREC,
+qui classent par taux d'inclusion réel plutôt que par popularité globale.
+
+Deux choix qui se discutent :
+
+- **Une carte figure dans chacun de ses types.** Un « Artifact Creature »
+  apparaît chez les artefacts et chez les créatures. Pour un usage d'achat
+  c'est le bon comportement : on cherche un rocher de mana dans les artefacts
+  sans se demander s'il est aussi une créature, et on ne l'achète qu'une fois.
+- **Trente planeswalkers au lieu de cinquante** : ils sont bien moins nombreux,
+  et la queue du classement descendrait vite dans ce qui ne se joue pas.
+
+Les terrains de base sont exclus, comme partout : ils ne s'achètent pas. Le
+format (`commander` / `duel`) change la banlist appliquée — Sol Ring domine les
+artefacts en multijoueur et disparaît en duel, où des cartes moins jouées
+prennent sa place. Les deux listes ne s'emboîtent donc pas, un test le fige.
+
+**Pas d'appel à `card_images.ensure_images` sur cet endpoint**, contrairement
+aux écrans à vignettes : huit types à cinquante cartes font près de quatre
+cents visuels à rapatrier six par six au premier chargement, soit une
+vingtaine de secondes et autant de requêtes chez Scryfall. La page se lit en
+tableau — rang, nom, coût, prix — ce qui est de toute façon plus utile pour des
+courses que des vignettes.
+
 
 ## Reste à faire
 
