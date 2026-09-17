@@ -139,7 +139,10 @@ backend/
 2. **Tout `ALTER TABLE cards ADD COLUMN` impose de rejouer
    `scripts/rebuild_cheapest_view.sql`** : une vue matérialisée fige sa liste de
    colonnes à la création, et `REFRESH` ne l'élargit pas — la nouvelle colonne
-   resterait invisible.
+   resterait invisible. Et si la colonne vient de Scryfall, il faut **en plus**
+   relancer `sync_scryfall.py` : elle naît à sa valeur par défaut partout, et
+   seule une synchronisation complète la renseigne (cas de
+   `banned_as_commander_duel`, migration 015).
 
 ### Collection et minimisation des achats
 
@@ -715,11 +718,20 @@ Iona, Leovold, Erayo et Griselbrand sont bannis en multi et légaux en duel.
 Demander le format en deuxième laissait choisir un commandant injouable, et
 l'interdiction n'apparaissait qu'à la construction, après l'archétype.
 
-**Scryfall ne distingue pas « banni comme commandant » de « banni tout court ».**
-Geist of Saint Traft, interdit à ce seul titre en Duel Commander, y est marqué
-banni intégralement : on refuse donc une carte jouable dans les 99. Plus strict
-que la règle réelle, jamais plus laxiste — et aucune liste illégale n'est
-proposée.
+**« Banni comme commandant » n'est pas « banni ».** Le duel interdit 27 cartes
+au seul titre de commandant — Geist of Saint Traft, Yuriko, Edgar Markov — qui
+restent parfaitement jouables dans les 99. Scryfall publie cette nuance sous la
+valeur `restricted` du format duel ; `cards.banned_as_commander_duel` la
+retient, et `legal_duel` reste vrai pour ces cartes. Le multijoueur n'a pas
+d'équivalent (`restricted:commander` ne renvoie aucune carte), d'où une clause
+vide de ce côté plutôt qu'une colonne toujours fausse.
+
+Le piège est que le sync testait `legalities.duel == "legal"` : `restricted`
+tombait donc à `false` et ces 27 cartes étaient traitées comme bannies tout
+court. L'information arrivait à chaque synchronisation et était jetée.
+**Éligibilité et légalité sont désormais deux questions distinctes**, vérifiées
+aux deux endroits — la liste des commandants et la construction — pour qu'une
+URL fabriquée à la main ne contourne pas le filtre.
 C'est la seule page qui ignore les decks existants et regarde **toute la
 collection** — en compétition, un seul deck part avec le joueur, la règle « un
 exemplaire dans un seul deck » ne s'applique donc pas.

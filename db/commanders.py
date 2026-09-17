@@ -18,6 +18,17 @@ IS_COMMANDER_TYPE = """
 
 LEGALITY_COLUMNS = {"commander": "legal_commander", "duel": "legal_duel"}
 
+# Être jouable dans les 99 ne suffit pas à être commandant. Le duel bannit
+# 27 cartes **comme commandant seulement** (Geist of Saint Traft, Yuriko,
+# Minsc & Boo) : Scryfall les publie en `restricted`, et la colonne
+# `banned_as_commander_duel` les retient. Le multijoueur n'a pas d'équivalent —
+# `restricted:commander` ne renvoie aucune carte — d'où une clause vide de ce
+# côté plutôt qu'une colonne toujours fausse.
+COMMANDER_ELIGIBILITY = {
+    "commander": "TRUE",
+    "duel": "NOT c.banned_as_commander_duel",
+}
+
 # Colonnes d'une carte recommandée. `owned_quantity` est ce qui rend la suite
 # calculable : c'est lui qui dit si la carte coûte quelque chose.
 # Mêmes colonnes que les recommandations, moins celles qui viennent d'EDHREC :
@@ -42,13 +53,13 @@ def owned_commanders(format: str = "commander") -> list[dict]:
     """
     Les commandants possédés et **légaux dans le format demandé**.
 
-    Scryfall ne distingue pas « banni comme commandant » de « banni tout
-    court » : un commandant interdit à ce seul titre en Duel Commander y est
-    marqué banni intégralement. On est donc plus strict que la réalité — une
-    carte jouable dans les 99 se voit refusée — mais jamais plus laxiste, et
-    aucune liste illégale n'est proposée.
+    Deux interdictions distinctes, que `legal_duel` seul confondait : une carte
+    peut être bannie tout court, ou bannie **comme commandant** en restant
+    jouable dans les 99. Scryfall publie la seconde sous la valeur `restricted`
+    du format duel ; `banned_as_commander_duel` la retient.
     """
     legality = LEGALITY_COLUMNS[format]
+    eligibility = COMMANDER_ELIGIBILITY[format]
     with get_conn() as conn:
         with conn.cursor() as cur:
             cur.execute(f"""
@@ -67,7 +78,7 @@ def owned_commanders(format: str = "commander") -> list[dict]:
                 JOIN cards_cheapest c ON c.oracle_id = col.oracle_id
                 LEFT JOIN card_names_fr fr ON fr.oracle_id = c.oracle_id
                 LEFT JOIN commander_brackets b ON b.commander_oracle_id = c.oracle_id
-                WHERE c.{legality} AND {IS_COMMANDER_TYPE}
+                WHERE c.{legality} AND {eligibility} AND {IS_COMMANDER_TYPE}
                 ORDER BY c.oracle_id, c.name
             """)
             return cur.fetchall()

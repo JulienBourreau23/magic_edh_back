@@ -125,3 +125,53 @@ def test_la_liste_des_commandants_depend_du_format():
                 )
                 illégaux = [r["name"] for r in cur.fetchall()]
                 assert illégaux == [], f"{format} : {illégaux}"
+
+
+def test_banni_comme_commandant_n_est_pas_banni_tout_court():
+    """
+    Le duel distingue deux interdictions que `legal_duel` seul confondait :
+    bannie tout court, et bannie **comme commandant** en restant jouable dans
+    les 99. Scryfall publie la seconde sous `restricted` ; le sync la traitait
+    comme un bannissement, ce qui privait le format de 27 cartes.
+
+    Geist of Saint Traft est le cas d'école : interdit comme commandant en Duel
+    Commander, parfaitement jouable dans les 99.
+    """
+    from db.core import get_conn
+
+    with get_conn() as conn:
+        with conn.cursor() as cur:
+            cur.execute(
+                "SELECT name, legal_duel, banned_as_commander_duel FROM cards_cheapest "
+                "WHERE banned_as_commander_duel"
+            )
+            interdits = cur.fetchall()
+
+    if not interdits:
+        pytest.skip("migration_015 non jouée ou sync Scryfall non relancé")
+
+    # Une carte bannie comme commandant reste légale dans le deck : si les deux
+    # drapeaux disaient la même chose, la colonne ne servirait à rien.
+    for carte in interdits:
+        assert carte["legal_duel"], carte["name"]
+
+    assert "Geist of Saint Traft" in {c["name"] for c in interdits}
+
+
+def test_un_commandant_banni_a_ce_titre_sort_de_la_liste_duel():
+    import db.commanders as commanders_db
+    from db.core import get_conn
+
+    duel = {str(c["oracle_id"]) for c in commanders_db.owned_commanders("duel")}
+    if not duel:
+        pytest.skip("aucun commandant possédé")
+
+    with get_conn() as conn:
+        with conn.cursor() as cur:
+            cur.execute(
+                "SELECT name FROM cards_cheapest "
+                "WHERE oracle_id = ANY(%s::uuid[]) AND banned_as_commander_duel",
+                (sorted(duel),),
+            )
+            fautifs = [r["name"] for r in cur.fetchall()]
+    assert fautifs == [], fautifs

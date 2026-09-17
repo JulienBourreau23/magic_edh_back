@@ -34,7 +34,7 @@ INSERT INTO cards (
     colors, color_identity, keywords, power, toughness, loyalty,
     set_code, collector_number, rarity, legal_commander, price_eur,
     card_faces, image_uri, game_changer, legal_duel, produced_mana, edhrec_rank,
-    categories, price_eur_foil
+    categories, price_eur_foil, banned_as_commander_duel
 ) VALUES %s
 ON CONFLICT (scryfall_id) DO UPDATE SET
     oracle_id = EXCLUDED.oracle_id,
@@ -57,6 +57,7 @@ ON CONFLICT (scryfall_id) DO UPDATE SET
     image_uri = EXCLUDED.image_uri,
     game_changer = EXCLUDED.game_changer,
     legal_duel = EXCLUDED.legal_duel,
+    banned_as_commander_duel = EXCLUDED.banned_as_commander_duel,
     produced_mana = EXCLUDED.produced_mana,
     edhrec_rank = EXCLUDED.edhrec_rank,
     categories = EXCLUDED.categories,
@@ -108,12 +109,20 @@ def _row(card: dict) -> tuple:
         json.dumps(card["card_faces"]) if card.get("card_faces") else None,
         _image_uri(card),
         bool(card.get("game_changer")),
-        (card.get("legalities") or {}).get("duel") == "legal",
+        # `restricted` en duel veut dire « banni comme commandant », pas
+        # « banni » : la carte reste jouable dans les 99. Tester l'égalité à
+        # "legal" écartait ces 27 cartes du format entier.
+        _duel_legality(card) in ("legal", "restricted"),
         card.get("produced_mana") or [],
         card.get("edhrec_rank"),
         classify(card.get("type_line"), card.get("oracle_text"), card.get("produced_mana")),
         _price(prices.get("eur_foil")),
+        _duel_legality(card) == "restricted",
     )
+
+
+def _duel_legality(card: dict) -> str | None:
+    return (card.get("legalities") or {}).get("duel")
 
 
 def _wanted(card: dict) -> bool:

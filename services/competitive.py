@@ -286,6 +286,14 @@ def build(commander: dict, theme_slug: str, format: str, max_price: float) -> di
     if not commander.get(legality_field):
         return {"error": f"{commander['name']} n'est pas légal dans ce format."}
 
+    # Et « jouable dans les 99 » ne vaut pas « peut être commandant » : le duel
+    # bannit 27 cartes à ce seul titre, Geist of Saint Traft en tête. Le
+    # vérifier ici autant que dans la liste des commandants, sinon une URL
+    # fabriquée à la main contournerait le filtre.
+    if format == "duel" and commander.get("banned_as_commander_duel"):
+        return {"error": f"{commander['name']} est banni comme commandant en Duel Commander, "
+                         "mais reste jouable dans les 99."}
+
     themes = {theme["slug"]: theme for theme in themes_db.themes_for(commander_oracle_id)}
     theme = themes.get(theme_slug)
     if theme is None:
