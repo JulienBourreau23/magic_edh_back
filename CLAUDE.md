@@ -30,8 +30,9 @@ l'ajoute (LXC IA, même hôte qu'Ollama pour `sw-coaching`), elle doit
 
 - **Base URL** : `NEXT_PUBLIC_API_URL` (`lib/api.ts`), définie dans `.env.local`.
   En dev local : `http://localhost:8000`.
-- **Pas d'auth** — outil personnel, mono-utilisateur. À ajouter sur le modèle
-  JWT de `sw-coaching/sw_coach_backend/backend/auth.py` si besoin.
+- **Auth JWT** sur tous les routeurs sauf `/health` et `/auth/login` — voir le
+  chapitre « Authentification ». Le jeton vit dans le `localStorage`, ce qui
+  force les pages qui chargent des données à être des composants client.
 - **CORS** : whitelist dans `backend/config.py` (`CORS_ORIGINS`).
 - **Images de cartes** : le back sert `/card-images` (monté sur `CARD_IMAGES_DIR`,
   `/srv/mtg-cards` en prod — comme `/icons` → `/srv/monsters` pour sw-coaching).
@@ -49,33 +50,66 @@ bannis en Duel Commander. D'où deux colonnes distinctes (`legal_commander`,
 
 ```
 backend/
-├── main.py                  # FastAPI, CORS, mount /card-images, routers
+├── main.py                   # FastAPI, CORS, mount /card-images, routers
 ├── config.py                 # env vars (PG_*, CARD_IMAGES_DIR, CORS_ORIGINS, Scryfall)
+├── auth.py                   # JWT ; identifiants pris dans l'environnement
 ├── db/
-│   ├── core.py                 # pool Postgres
-│   ├── cards.py                 # résolution de noms, recherche, cartes candidates
-│   └── decks.py                 # decks, deck_cards, import_issues, CRUD
+│   ├── core.py               # pool Postgres
+│   ├── cards.py              # résolution de noms, recherche, cartes candidates
+│   ├── decks.py              # decks, deck_cards, import_issues, CRUD
+│   ├── collection.py         # ce qu'on possède, par oracle_id
+│   ├── wishlist.py           # ce qu'on envisage d'acheter — même clé, exprès
+│   ├── commanders.py         # commandants possédés + recommandations EDHREC
+│   ├── themes.py             # archétypes EDHREC et leurs cartes
+│   └── combos.py             # combos à deux cartes présents dans un deck
 ├── routers/
-│   ├── decks.py                 # import, CRUD, simulation, suggestions
-│   ├── cards.py                 # recherche
-│   ├── deck_plans.py            # plan de 4 decks à monter
-│   ├── matchup.py               # comparaison de deux decks
-│   └── must_have.py             # cartes à avoir, par type
+│   ├── decks.py              # import, CRUD, simulation, suggestions
+│   ├── cards.py              # recherche
+│   ├── collection.py         # saisie et quantités
+│   ├── wishlist.py           # liste de recherche + passage en collection
+│   ├── must_have.py          # cartes à avoir, par type
+│   ├── deck_ideas.py         # quel deck monter
+│   ├── deck_plans.py         # plan de 4 decks à monter
+│   ├── competitive.py        # construction d'un deck compétitif
+│   ├── balance.py            # équilibrage d'un groupe de decks
+│   ├── matchup.py            # comparaison de deux decks
+│   ├── auth.py               # /auth/login, /auth/me
+│   └── admin.py              # déclenche les syncs EDHREC et combos (Kestra)
 ├── services/
-│   ├── mana.py                  # coût de mana + castabilité (couplage biparti)
-│   ├── card_categories.py       # classification (ramp, draw, removal...)
-│   ├── decklist_parser.py       # parsing texte brut + résolution + persistance
-│   ├── deck_analysis.py         # courbe, prix, légalité, manabase, bracket
-│   ├── simulation.py            # Monte-Carlo goldfish + main de départ
-│   ├── suggestions.py           # diagnostics -> cartes à ajouter / retirer
-│   ├── matchup.py               # comparaison sur axes mesurés
-│   ├── deck_plans.py            # comparaison par commandant + 4 decks équilibrés
-│   └── card_images.py           # téléchargement à la demande
+│   ├── mana.py               # coût de mana + castabilité (couplage biparti)
+│   ├── card_categories.py    # classification (ramp, draw, removal, stax...)
+│   ├── decklist_parser.py    # parsing texte brut + résolution + persistance
+│   ├── collection_import.py  # saisie en masse de la collection
+│   ├── wishlist_import.py    # saisie en masse de la liste de recherche
+│   ├── deck_analysis.py      # courbe, prix, légalité, manabase, bracket
+│   ├── simulation.py         # Monte-Carlo goldfish + main de départ
+│   ├── duel.py               # duel simulé coup par coup
+│   ├── suggestions.py        # diagnostics -> cartes à ajouter / retirer
+│   ├── matchup.py            # comparaison sur axes mesurés
+│   ├── allocation.py         # répartit la collection entre les decks
+│   ├── balance.py            # plan d'équilibrage d'un groupe
+│   ├── deck_plans.py         # comparaison par commandant + 4 decks équilibrés
+│   ├── deck_ideas.py         # commandants classés par couverture du noyau
+│   ├── competitive.py        # deck compétitif bâti sur la collection
+│   ├── must_have.py          # cartes à avoir, par type
+│   ├── combos.py             # combos présents dans un deck
+│   ├── edhrec.py             # récupération EDHREC (module isolé exprès)
+│   ├── spellbook.py          # import du catalogue Commander Spellbook
+│   ├── magic_ville_pdf.py    # découpage d'une planche de proxys
+│   └── card_images.py        # téléchargement à la demande
 ├── scripts/
-│   ├── migration_00*.sql        # schéma et colonnes successives
-│   ├── rebuild_cheapest_view.sql # définition canonique de la vue matérialisée
-│   └── sync_scryfall.py          # sync du bulk data Scryfall
-└── tests/                        # `python -m pytest`
+│   ├── migration_0*.sql      # schéma et colonnes successives
+│   ├── rebuild_cheapest_view.sql  # définition canonique de la vue matérialisée
+│   ├── sync_scryfall.py      # bulk data Scryfall -> cards (+ REFRESH)
+│   ├── sync_french_names.py  # alias français (bulk all_cards, ~400 Mo)
+│   ├── sync_edhrec.py        # recommandations et archétypes
+│   ├── sync_combos.py        # catalogue Commander Spellbook
+│   ├── backfill_categories.py # rejoue la classification sans retélécharger
+│   ├── decklist_from_pdf.py  # planche magic-ville -> decklist
+│   └── hash_password.py      # hash bcrypt pour AUTH_PASSWORD_HASH
+├── kestra/                   # les trois flows d'ordonnancement
+├── deploy/                   # unit systemd, INSTALL.md, kestra-sync.sh
+└── tests/                    # `python -m pytest`
 ```
 
 ### Modèle de données
@@ -149,6 +183,50 @@ La liste d'achats consolidée s'exporte en PDF côté navigateur
 (`lib/shopping-pdf.ts`, jsPDF — même approche que sw-coaching). Les deux pages
 qui produisent des achats (`/balance` et `/deck-plans`) renvoient **la même
 forme** `ShoppingItem`, c'est ce qui permet un seul exportateur.
+
+### Liste de recherche (`/wishlist`)
+
+Ce qu'on **envisage** d'acheter, par opposition à la collection qui est ce
+qu'on possède. Les deux tables ont volontairement **la même clé** (`oracle_id`)
+et les mêmes colonnes d'affichage, et ce n'est pas de la symétrie décorative :
+c'est ce qui permet à l'achat de faire basculer une ligne d'une table à l'autre
+**sans rien convertir**.
+
+`POST /wishlist/{oracle_id}/acquire` est ce qui justifie la table. Sans ce
+geste, il faudrait retirer la carte d'un côté et la ressaisir de l'autre, et la
+collection finirait fausse — or c'est elle qui pilote `/balance`,
+`/deck-plans`, `/competitive` et `/must-have`. Trois précautions en découlent :
+
+- **Les deux écritures sont dans la même transaction**, avec un `SELECT ...
+  FOR UPDATE` sur la ligne. Une coupure entre les deux perdrait la carte des
+  deux côtés ou la compterait deux fois, et l'erreur se paierait en argent.
+- **L'acquisition peut être partielle** : deux exemplaires cherchés, un seul
+  trouvé en boutique. Le reste attend dans la liste.
+- **La quantité tombée à zéro supprime la ligne** plutôt que de laisser un
+  zéro, pour que `list_all` n'ait pas à filtrer ce qui n'existe plus.
+
+Les quantités **s'additionnent** à l'ajout, comme dans la collection et pour la
+même raison : vouloir une carte pour deux decks, c'est en vouloir deux. La note
+du dernier ajout l'emporte — c'est la plus récente, donc celle qui explique
+pourquoi la carte est encore là.
+
+Deux détails qui évitent de mal lire l'écran :
+
+- **Le tri est par prix décroissant.** Une liste de recherche sert à prévoir un
+  budget : ce sont les cartes chères qui décident, pas les cartes à 0,20 €.
+- **`unknown_price` est compté à part** dans les statistiques. Une carte sans
+  prix non-foil connu n'entre pas dans le total, et le dire empêche de lire ce
+  total comme complet — c'est la même règle que partout : prix inconnu n'est
+  pas prix nul.
+
+**Les visuels sont rapatriés ici** (`ensure_images`), contrairement à
+`/must-have` : la liste de recherche reste courte par nature, quelques dizaines
+de cartes, alors que les cartes à avoir en comptent près de quatre cents.
+
+Les terrains de base n'y entrent jamais, comme dans la collection : supposés
+disponibles sans limite, ils ne se cherchent pas. La saisie en masse partage le
+parseur des decklists (`decklist_parser`) — même format d'entrée, seule la
+destination change.
 
 ### Monter quatre decks d'un coup (`/deck-plans`)
 
@@ -262,19 +340,29 @@ preset `nova`, comme sw-coaching).
 
 ```
 app/
-├── decks/page.tsx                  # liste
+├── decks/page.tsx                   # liste
 ├── decks/import/page.tsx            # collage de decklist + choix du format
 ├── decks/[id]/page.tsx              # fiche : bracket, manabase, rôles, cartes
 ├── decks/[id]/simulation/page.tsx   # métriques + main de départ en images
 ├── decks/[id]/suggestions/page.tsx  # ajouts/retraits sous plafond de prix
 ├── collection/page.tsx              # saisie en masse + à l'unité, quantités
-├── balance/page.tsx                 # équilibrage de 4 decks + liste d'achats PDF
-├── deck-plans/page.tsx              # comparaison par commandant + 4 decks à monter + PDF
+├── wishlist/page.tsx                # liste de recherche + « c'est acheté »
 ├── must-have/page.tsx               # cartes les plus jouées par type, sous plafond
-└── matchup/page.tsx                 # comparaison de deux decks
-components/  CardTile, CardSearch, DeckToolbar, ImportIssuesPanel, ManaCurveChart
-lib/api.ts                            # tous les appels au back + types
-lib/shopping-pdf.ts                   # export PDF de la liste d'achats
+├── deck-ideas/page.tsx              # quel deck monter avec ce qu'on possède
+├── deck-plans/page.tsx              # comparaison par commandant + 4 decks à monter + PDF
+├── competitive/page.tsx             # deck compétitif bâti sur la collection
+├── balance/page.tsx                 # équilibrage de 4 decks + liste d'achats PDF
+├── matchup/page.tsx                 # comparaison de deux decks
+└── login/page.tsx                   # seule page utilisable sans jeton
+components/
+    CardTile, CardBinder, CardSearch, CollectionFilters, CompetitiveDeck,
+    DeckToolbar, ImportIssuesPanel, ManabaseAdvice, TopNav, ThemeProvider/Toggle
+    graphiques : ManaCurveChart, ColorDonut, AxisRings, InitiativeSplit, DuelOutcome
+lib/api.ts                  # tous les appels au back + types
+lib/auth.ts                 # jeton en localStorage (d'où les composants client)
+lib/collection-filters.ts   # filtres de la page collection
+lib/mtg-labels.ts           # libellés français des mots-clés Scryfall
+lib/shopping-pdf.ts         # export PDF de la liste d'achats
 ```
 
 > Next.js 16 a des ruptures avec les versions antérieures (`params` est une
@@ -478,8 +566,15 @@ jargon importé.
 - Les seuils de construction (`ROLE_TARGETS`, nombre de terrains) sont des
   repères communément admis, pas des vérités — ils servent à signaler un écart
   franc. Quand un conseil paraît faux, c'est le seuil qu'il faut discuter.
-- Les tests couvrent le parsing, le calcul de mana, la classification et la
-  reproductibilité de la simulation : les endroits où une erreur est silencieuse.
+- **Les tests visent les erreurs silencieuses**, pas la couverture : parsing et
+  résolution de noms, calcul de mana, classification, reproductibilité de la
+  simulation, planchers de bracket, listes d'achats, et le passage
+  transactionnel de la liste de recherche à la collection. Le critère est
+  toujours le même — une erreur qui ne lève aucune alerte et se paie en argent
+  ou en conseil faux mérite un test ; une fonction évidente, non.
+- Les tests qui écrivent en base **se sautent proprement** quand Postgres est
+  injoignable (`pytestmark = skipif`), pour que la suite reste lançable
+  n'importe où.
 
 ## Combos à deux cartes et bracket
 
@@ -651,23 +746,23 @@ courses que des vignettes.
 
 ## Reste à faire
 
-**Déployé** : DB (`lxc-pg18`, 192.168.1.104), back (`lxc-mtg-back`, 192.168.1.143)
-et front (`lxc-mtg-front`, 192.168.1.144), exposés en
-`mtg-edh-api.julien-cloud.eu` et `mtg-edh.julien-cloud.eu`.
+**Déployé et planifié.** DB (`lxc-pg18`, 192.168.1.104), back (`lxc-mtg-back`,
+192.168.1.143) et front (`lxc-mtg-front`, 192.168.1.144), exposés en
+`mtg-edh-api.julien-cloud.eu` et `mtg-edh.julien-cloud.eu`. Les quatre
+synchronisations sont ordonnancées par Kestra (`lxc-kestra`, 192.168.1.119).
 
-**Ordonnancement : fait.** Les trois flows tournent dans `lxc-kestra` et sont
-planifiés — voir « Les quatre synchronisations » plus haut.
+Rien n'est en chantier. Deux pistes ouvertes, aucune engagée :
 
-Dans l'ordre :
+- **Narration de partie par Ollama** (LXC IA, même hôte que pour
+  `sw-coaching`). Le principe directeur tient : une IA ne commenterait que des
+  chiffres déjà calculés, elle n'en produirait aucun. Aucune IA n'est
+  nécessaire au fonctionnement du projet aujourd'hui.
+- **Changer la source du classement de `/must-have`** pour les pages *top
+  cards* d'EDHREC, qui mesurent le taux d'inclusion réel plutôt que la
+  popularité globale d'`edhrec_rank`. C'est la seule évolution de cette page
+  qui demanderait une table et un flow Kestra propres.
 
-1. **Critères de bracket restants.** `stax` et `extra_turn` sont classifiés et
-   affichés comme signaux, mais ne pèsent pas encore sur le bracket calculé
-   (`deck_analysis.bracket_estimate`) ; la destruction de terrains de masse
-   n'est pas classifiée du tout.
-2. **Chapitres manquants de ce document** : la wishlist (`routers/wishlist.py`,
-   `services/wishlist_import.py`, `app/wishlist/page.tsx`, migration 013), et
-   `/collection` comme `/competitive` absents de l'arborescence front.
-
-Évolution possible, non engagée : narration de partie par Ollama par-dessus les
-chiffres calculés (LXC IA). Le principe directeur reste qu'aucune IA n'est
-nécessaire au fonctionnement du projet.
+Le duel simulé reste le point le plus perfectible du projet : il ignore vol,
+piétinement, capacités activées et déclenchées, jetons, moteurs de pioche,
+combos et contresorts. Le biais a une direction connue et l'interface le dit,
+mais chaque mécanique ajoutée le réduirait.
