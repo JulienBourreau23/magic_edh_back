@@ -35,7 +35,7 @@ def _commander(oracle_id: UUID) -> dict:
 
 
 @router.get("/commanders")
-def list_commanders():
+def list_commanders(format: str = Query(default="commander", pattern="^(commander|duel)$")):
     """
     Étape 1 : les commandants de la collection, **classés par ce qu'on peut en
     tirer tout de suite**, avec l'archétype qui donne ce résultat.
@@ -54,8 +54,8 @@ def list_commanders():
     mêmes quelques dizaines de cartes à tout le monde — elle ne change pas
     l'ordre.
     """
-    commanders = commanders_db.owned_commanders()
-    best = themes_db.best_theme_by_commander("commander")
+    commanders = commanders_db.owned_commanders(format)
+    best = themes_db.best_theme_by_commander(format)
 
     enriched = []
     for commander in commanders:

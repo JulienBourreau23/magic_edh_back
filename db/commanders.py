@@ -4,11 +4,19 @@ from services.card_categories import is_land
 
 # Un commandant : créature légendaire, ou carte disant explicitement qu'elle
 # peut l'être (arrière-plans, quelques planeswalkers).
-IS_COMMANDER_CLAUSE = """
-    c.legal_commander
-    AND (c.type_line LIKE 'Legendary Creature%%'
-         OR c.oracle_text ILIKE '%%can be your commander%%')
+#
+# **La légalité dépend du format et ne se déduit pas d'un seul sens.** Geist of
+# Saint Traft est légal en multi et banni en duel ; Rofellos, Iona, Leovold,
+# Erayo et Griselbrand sont bannis en multi et légaux en duel. Filtrer sur
+# `legal_commander` en dur, ce que faisait cette clause, écartait donc les
+# seconds d'office et laissait passer le premier jusqu'à l'écran de
+# construction.
+IS_COMMANDER_TYPE = """
+    (c.type_line LIKE 'Legendary Creature%%'
+     OR c.oracle_text ILIKE '%%can be your commander%%')
 """
+
+LEGALITY_COLUMNS = {"commander": "legal_commander", "duel": "legal_duel"}
 
 # Colonnes d'une carte recommandée. `owned_quantity` est ce qui rend la suite
 # calculable : c'est lui qui dit si la carte coûte quelque chose.
@@ -30,7 +38,17 @@ RECOMMENDATION_COLUMNS = """
 """
 
 
-def owned_commanders() -> list[dict]:
+def owned_commanders(format: str = "commander") -> list[dict]:
+    """
+    Les commandants possédés et **légaux dans le format demandé**.
+
+    Scryfall ne distingue pas « banni comme commandant » de « banni tout
+    court » : un commandant interdit à ce seul titre en Duel Commander y est
+    marqué banni intégralement. On est donc plus strict que la réalité — une
+    carte jouable dans les 99 se voit refusée — mais jamais plus laxiste, et
+    aucune liste illégale n'est proposée.
+    """
+    legality = LEGALITY_COLUMNS[format]
     with get_conn() as conn:
         with conn.cursor() as cur:
             cur.execute(f"""
@@ -49,7 +67,7 @@ def owned_commanders() -> list[dict]:
                 JOIN cards_cheapest c ON c.oracle_id = col.oracle_id
                 LEFT JOIN card_names_fr fr ON fr.oracle_id = c.oracle_id
                 LEFT JOIN commander_brackets b ON b.commander_oracle_id = c.oracle_id
-                WHERE {IS_COMMANDER_CLAUSE}
+                WHERE c.{legality} AND {IS_COMMANDER_TYPE}
                 ORDER BY c.oracle_id, c.name
             """)
             return cur.fetchall()
@@ -134,7 +152,7 @@ def owned_pool(identity: list[str], exclude_oracle_ids: list[str],
     Les cartes sans rang passent en dernier — une absence de mesure n'est pas
     une bonne note.
     """
-    legality = "legal_duel" if format == "duel" else "legal_commander"
+    legality = LEGALITY_COLUMNS[format]
     with get_conn() as conn:
         with conn.cursor() as cur:
             cur.execute(

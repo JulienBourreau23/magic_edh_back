@@ -96,3 +96,32 @@ def test_chaque_vivier_respecte_la_banlist_de_son_format():
         assert pool, f"vivier vide en {format}"
         illégales = [c["name"] for c in pool if not c[colonne]]
         assert illégales == [], f"{format} : {illégales[:5]}"
+
+
+def test_la_liste_des_commandants_depend_du_format():
+    """
+    La légalité d'un commandant n'est pas la même dans les deux formats, et
+    dans les deux sens : Edgar Markov est légal en multi et banni en duel,
+    Rofellos et Griselbrand l'inverse. Une liste unique laissait donc passer
+    des commandants injouables jusqu'à l'écran de construction, et en cachait
+    d'autres à jamais.
+    """
+    import db.commanders as commanders_db
+    from db.core import get_conn
+
+    multi = {str(c["oracle_id"]) for c in commanders_db.owned_commanders("commander")}
+    duel = {str(c["oracle_id"]) for c in commanders_db.owned_commanders("duel")}
+
+    with get_conn() as conn:
+        with conn.cursor() as cur:
+            for format, colonne, ids in (("commander", "legal_commander", multi),
+                                         ("duel", "legal_duel", duel)):
+                if not ids:
+                    continue
+                cur.execute(
+                    f"SELECT name FROM cards_cheapest "
+                    f"WHERE oracle_id = ANY(%s::uuid[]) AND NOT {colonne}",
+                    (sorted(ids),),
+                )
+                illégaux = [r["name"] for r in cur.fetchall()]
+                assert illégaux == [], f"{format} : {illégaux}"

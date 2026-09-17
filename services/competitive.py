@@ -10,8 +10,12 @@ cette stratégie, pas ce qui est cher ou spectaculaire.
 Trois contraintes sont dures, jamais arbitrées :
 
 - **la banlist du format**, appliquée en SQL (`legal_duel` ou `legal_commander`)
-  avant même que la carte entre dans le vivier : Duel Commander bannit ce que
-  le multi autorise, et l'inverse n'existe pas ;
+  avant même que la carte entre dans le vivier. Elle vaut **dans les deux
+  sens** : le Duel Commander bannit ce que le multi autorise (Sol Ring, Ancient
+  Tomb, Edgar Markov), mais l'inverse existe aussi (Rofellos, Griselbrand).
+  D'où le choix du format **en première étape** — la liste des commandants en
+  dépend, et découvrir l'interdiction après avoir choisi l'archétype était une
+  perte de temps ;
 - **l'identité de couleur** du commandant ;
 - **le singleton** : un exemplaire par carte, terrains de base exceptés.
 

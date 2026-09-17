@@ -60,11 +60,15 @@ def slugify(name: str) -> str:
 def commanders_to_fetch(include_decks: bool) -> list[tuple[str, str]]:
     """[(oracle_id, nom)] — les légendaires possédés, et optionnellement ceux
     déjà utilisés comme commandant dans un deck."""
+    # Légal dans **l'un ou l'autre** format : les recommandations EDHREC ne
+    # dépendent pas du format, et un commandant jouable en duel seulement
+    # (Rofellos, Leovold, Griselbrand) mérite les siennes autant qu'un autre.
+    # Filtrer sur `legal_commander` seul les privait de données à jamais.
     sources = ["""
         SELECT DISTINCT c.oracle_id, c.name
         FROM collection col
         JOIN cards c ON c.oracle_id = col.oracle_id
-        WHERE c.legal_commander
+        WHERE (c.legal_commander OR c.legal_duel)
           AND (c.type_line LIKE 'Legendary Creature%%'
                OR c.oracle_text ILIKE '%%can be your commander%%')
     """]

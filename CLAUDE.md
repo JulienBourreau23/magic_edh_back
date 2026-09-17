@@ -706,7 +706,20 @@ corrections, toutes nommées dans le rapport.
 
 ## Construire un deck compétitif (`/competitive`)
 
-Quatre étapes : un commandant de la collection, le format, l'archétype, le deck.
+Quatre étapes : **le format d'abord**, puis un commandant de la collection,
+l'archétype, le deck.
+
+L'ordre n'est pas cosmétique : **la liste des commandants dépend du format, dans
+les deux sens**. Edgar Markov est légal en multi et banni en duel ; Rofellos,
+Iona, Leovold, Erayo et Griselbrand sont bannis en multi et légaux en duel.
+Demander le format en deuxième laissait choisir un commandant injouable, et
+l'interdiction n'apparaissait qu'à la construction, après l'archétype.
+
+**Scryfall ne distingue pas « banni comme commandant » de « banni tout court ».**
+Geist of Saint Traft, interdit à ce seul titre en Duel Commander, y est marqué
+banni intégralement : on refuse donc une carte jouable dans les 99. Plus strict
+que la règle réelle, jamais plus laxiste — et aucune liste illégale n'est
+proposée.
 C'est la seule page qui ignore les decks existants et regarde **toute la
 collection** — en compétition, un seul deck part avec le joueur, la règle « un
 exemplaire dans un seul deck » ne s'applique donc pas.
