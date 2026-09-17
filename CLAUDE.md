@@ -736,12 +736,19 @@ format (`commander` / `duel`) change la banlist appliquée — Sol Ring domine l
 artefacts en multijoueur et disparaît en duel, où des cartes moins jouées
 prennent sa place. Les deux listes ne s'emboîtent donc pas, un test le fige.
 
-**Pas d'appel à `card_images.ensure_images` sur cet endpoint**, contrairement
-aux écrans à vignettes : huit types à cinquante cartes font près de quatre
-cents visuels à rapatrier six par six au premier chargement, soit une
-vingtaine de secondes et autant de requêtes chez Scryfall. La page se lit en
-tableau — rang, nom, coût, prix — ce qui est de toute façon plus utile pour des
-courses que des vignettes.
+La page a **deux affichages**, visuels par défaut et liste au choix, comme la
+collection : sur une liste d'achats, beaucoup de cartes sont inconnues et une
+illustration les fait reconnaître plus vite qu'un nom, mais comparer des prix
+se fait en tableau. Les cartes possédées sont estompées et non retirées — leur
+place dans le classement reste une information.
+
+**Pas d'appel à `card_images.ensure_images` sur cet endpoint** pour autant,
+contrairement à `/wishlist` : huit types à cinquante cartes font près de quatre
+cents visuels, qu'un rapatriement six par six mettrait une vingtaine de
+secondes à récupérer au premier chargement. Les images viennent donc de
+Scryfall, et `CardTile` les charge en `loading="lazy"` : le navigateur ne prend
+que ce qui est à l'écran. C'est ce qui rend le mode visuel gratuit — il
+n'aurait pas été tenable en chargement imposé.
 
 
 ## Reste à faire
