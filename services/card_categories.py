@@ -24,6 +24,7 @@ PROTECTION = "protection"
 RECURSION = "recursion"
 EXTRA_TURN = "extra_turn"
 STAX = "stax"
+MASS_LAND_DENIAL = "mass_land_denial"
 
 # Catégories qui décrivent un rôle dans la construction du deck : ce sont
 # celles dont on mesure la quantité pour diagnostiquer un deck.
@@ -61,6 +62,24 @@ _RULES: list[tuple[str, re.Pattern]] = [
         # du tempo : le stax dure.
         r"|don't untap during(?!.*\bnext\b)"
         r"|skips? their untap step", re.I)),
+    # Destruction de terrains de masse : critère officiel de bracket, interdit
+    # aux brackets 1 à 3. Il ne se confond pas avec la destruction d'un terrain
+    # (Strip Mine, Cratère d'impact) : ce qui compte est la portée, « tous » ou
+    # « chaque joueur », pas la cible unique. `[^.]` borne la recherche à la
+    # phrase en cours, pour qu'« exile all creatures » suivi d'une phrase
+    # mentionnant un terrain ne déclenche pas la règle.
+    (MASS_LAND_DENIAL, re.compile(
+        # Armageddon, Ruination, Obliterate (« all artifacts, creatures, and
+        # lands »), Ajani Vengeant (« all lands target player controls »).
+        r"(destroy|exile) all\b[^.]{0,60}\blands?\b"
+        # Wildfire, Destructive Force : le sacrifice imposé à tous vaut la
+        # destruction, la différence ne tient qu'à qui prononce le verbe. Le
+        # pluriel est exigé — « chaque joueur sacrifie *un* terrain » (Tremble,
+        # Hurloon Shaman) prive d'une pose, pas de sa manabase.
+        r"|each player sacrifices [^.]{0,30}\blands\b"
+        # Sauf quand ce singulier se répète : Thoughts of Ruin sacrifie un
+        # terrain par carte en main.
+        r"|each player sacrifices [^.]{0,30}\bland\b[^.]{0,30}\bfor each\b", re.I)),
 ]
 
 # Une carte qui va chercher un terrain le nomme de deux façons : par le mot
@@ -76,6 +95,21 @@ _SPLIT_SECOND_RE = re.compile(r"split second", re.I)
 
 _LAND_SEARCH_RE = re.compile(
     rf"search your library for .*\b(lands?|{_BASIC_LAND_TYPES})\b", re.I)
+
+# Clauses où le mot « terrain » désigne ce qui est **épargné** ou ce à quoi
+# quelque chose d'autre est attaché. Elles sont retirées du texte avant la
+# recherche de destruction de masse, et non appliquées comme exclusion après
+# coup : « sacrifie tous ses terrains sauf trois » (Keldon Firebombers) reste
+# de la destruction de masse, alors qu'une exclusion sur la carte entière
+# l'aurait écartée.
+#   Elspeth Tirel  : « destroy all other permanents except for lands and tokens »
+#   Scourglass     : « destroy all permanents except for artifacts and lands »
+#   Haunting Echoes: « exile all cards ... other than basic land cards »
+#   Street Sweeper : « destroy all Auras attached to target land »
+_LAND_SPARED_RE = re.compile(
+    r"except for [^.]{0,40}?\blands?\b"
+    r"|other than [^.]{0,40}?\blands?\b"
+    r"|attached to [^.]{0,20}?\blands?\b", re.I)
 
 
 def classify(type_line: str | None, oracle_text: str | None, produced_mana: list[str] | None) -> list[str]:
@@ -95,8 +129,14 @@ def classify(type_line: str | None, oracle_text: str | None, produced_mana: list
     if not is_land and (produced_mana or _LAND_SEARCH_RE.search(text)):
         categories.add(RAMP)
 
+    # La destruction de masse se cherche sur un texte amputé des clauses qui
+    # épargnent les terrains ; les autres règles travaillent sur le texte
+    # entier, elles n'ont rien à y gagner.
+    text_hors_epargne = _LAND_SPARED_RE.sub(" ", text)
+
     for category, pattern in _RULES:
-        if pattern.search(text):
+        cible = text_hors_epargne if category == MASS_LAND_DENIAL else text
+        if pattern.search(cible):
             categories.add(category)
 
     if STAX in categories and _SPLIT_SECOND_RE.search(text):

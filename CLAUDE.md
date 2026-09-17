@@ -481,13 +481,18 @@ jargon importé.
 
 ## Combos à deux cartes et bracket
 
-Le bracket a deux critères qu'on sait constater, et seulement deux :
+Le bracket a quatre critères qu'on sait constater :
 
 - le nombre de **Game Changers** (colonne `game_changer`, liste officielle) ;
 - la présence d'un **combo infini à deux cartes qui gagne la partie**,
-  officiellement interdit aux brackets 1-2.
+  officiellement interdit aux brackets 1-2 ;
+- la **destruction de terrains de masse**, interdite aux brackets 1, 2 **et 3**
+  — c'est le critère le plus punitif du système : un seul Armageddon fait d'un
+  deck sans aucun Game Changer un bracket 4 ;
+- les **tours supplémentaires**, que le bracket 1 interdit purement et
+  simplement.
 
-Le second ne se lit pas dans le texte d'une carte — il naît de l'interaction
+Le combo ne se lit pas dans le texte d'une carte — il naît de l'interaction
 entre deux cartes — donc il se constate contre un catalogue plutôt qu'il ne se
 devine : `combos` (table reconstructible) est importée de **Commander
 Spellbook** par `services/spellbook.py`, avec la même organisation qu'EDHREC
@@ -508,6 +513,31 @@ Deux points qui ne sont pas intuitifs :
   qu'un combo à deux cartes soit un plan de *fin de partie*, sans définir le
   terme. On renvoie donc le mana total (les deux cartes + l'exécution) à
   comparer au ramp du deck, sans trancher à sa place.
+
+**Le stax n'est pas un critère officiel**, malgré la tentation : Winter Orb
+gêne autant qu'un Armageddon, mais le système ne le nomme nulle part. Le faire
+peser inventerait une règle et ferait dériver tous les brackets. Il reste
+affiché en signal brut, avec la densité de tuteurs — dont le texte officiel
+parle sans fixer de seuil, donc sans qu'on puisse en tirer un plancher.
+
+Deux finesses de la classification (`card_categories.MASS_LAND_DENIAL`), toutes
+deux issues de cartes réelles qui piégeaient la règle naïve :
+
+- **« Détruire tous les terrains » se distingue de « épargner les terrains ».**
+  Elspeth Tirel détruit « all other permanents *except for* lands », Scourglass
+  « all permanents except for artifacts and lands », Street Sweeper les auras
+  *attachées à* un terrain. Les clauses qui épargnent sont donc **retirées du
+  texte avant** la recherche, et non traitées en exclusion après coup : sans
+  quoi Keldon Firebombers (« sacrifie tous ses terrains *sauf trois* ») tomberait
+  avec elles alors qu'il détruit bel et bien.
+- **Un terrain chacun n'est pas une destruction de masse.** Tremble prive d'une
+  pose, pas d'une manabase — d'où l'exigence du pluriel, avec une exception
+  pour le singulier répété (Thoughts of Ruin : un terrain par carte en main).
+
+Les tours supplémentaires, eux, ne ferment **que** le bracket 1 : les brackets
+2 et 3 n'interdisent que de les *enchaîner*, ce qu'une liste de cartes ne
+permet pas de constater. On plafonne donc au bracket 2 sans prétendre
+distinguer un Time Warp isolé d'un moteur de tours, et l'interface le dit.
 
 ## Importer un deck depuis un PDF magic-ville
 

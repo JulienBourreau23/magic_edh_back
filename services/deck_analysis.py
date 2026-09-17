@@ -390,9 +390,19 @@ def legality_warnings(cards: list[dict], format: str = "commander") -> list[dict
     return warnings
 
 
+def _card_ref(card: dict) -> dict:
+    """Identité minimale d'une carte citée dans une explication de bracket."""
+    return {
+        "name": card["name"],
+        "name_fr": card.get("name_fr"),
+        "scryfall_id": card["scryfall_id"],
+        "is_commander": card["is_commander"],
+    }
+
+
 def bracket_estimate(cards: list[dict], combos: list[dict] | None = None) -> dict:
     """
-    Bracket officiel du Commander Format Panel, à partir des deux critères
+    Bracket officiel du Commander Format Panel, à partir des quatre critères
     qu'on sait constater.
 
     1. **Game Changers** : 0 = brackets 1-2, 1 à 3 = bracket 3, 4+ = brackets
@@ -401,39 +411,64 @@ def bracket_estimate(cards: list[dict], combos: list[dict] | None = None) -> dic
        interdits aux brackets 1-2. Un tel combo ne se lit pas dans le texte
        d'une carte — il naît de l'interaction — donc il se constate contre un
        catalogue (`services/combos.py`), et le déclarer relève ici du plancher.
+    3. **Destruction de terrains de masse** : interdite aux brackets 1, 2 **et
+       3**. C'est le critère le plus punitif du système : un seul Armageddon
+       suffit à faire d'un deck sans aucun Game Changer un bracket 4.
+    4. **Tours supplémentaires** : le bracket 1 les interdit tout court. Les
+       brackets 2 et 3 n'interdisent que de les *enchaîner*, ce qui ne se lit
+       pas dans une liste de cartes — on plafonne donc au bracket 2 sans
+       prétendre distinguer un Time Warp isolé d'un moteur de tours.
 
     Ce que ce calcul ne tranche **pas** : au-dessus du bracket 3, le texte
     officiel demande qu'un combo à deux cartes reste un plan de fin de partie,
     sans définir « fin de partie ». Le mana total du combo est renvoyé avec,
     à lire avec le ramp du deck ; c'est au joueur de trancher.
 
-    Les autres critères officiels (tours supplémentaires, stax, destruction de
-    terrains) ne sont pas quantifiables de façon fiable depuis les données de
-    carte : on les remonte en signaux bruts, sans les laisser modifier le
-    bracket, pour que l'écart entre le calcul et la réalité reste visible
-    plutôt que masqué derrière un chiffre.
+    Le **stax n'est pas un critère officiel** et ne pèse donc pas ici, malgré
+    la tentation : Winter Orb gêne autant qu'un Armageddon mais le système ne
+    le nomme nulle part. Il reste remonté en signal brut, avec la densité de
+    tuteurs — dont le texte officiel parle sans fixer de seuil.
     """
-    game_changers = [
-        {"name": c["name"], "name_fr": c.get("name_fr"),
-         "scryfall_id": c["scryfall_id"], "is_commander": c["is_commander"]}
-        for c in cards if c.get("game_changer")
-    ]
+    game_changers = [_card_ref(c) for c in cards if c.get("game_changer")]
     count = len(game_changers)
     combos = combos or []
     winning_combos = [combo for combo in combos if combo["wins_outright"]]
 
-    if count == 0 and not winning_combos:
-        bracket = {"min": 1, "max": 2, "label": "Bracket 1-2 (exhibition / core)"}
-    elif count <= 3:
-        bracket = {"min": 3, "max": 3, "label": "Bracket 3 (upgraded)"}
-    else:
+    def _avec(categorie: str) -> list[dict]:
+        return [_card_ref(c) for c in cards if categorie in (c.get("categories") or [])]
+
+    mass_land_denial = _avec(categories.MASS_LAND_DENIAL)
+    extra_turns = _avec(categories.EXTRA_TURN)
+
+    # L'ordre des tests est celui de la sévérité : le plancher le plus haut
+    # gagne. Un deck peut cumuler les motifs, on annonce le plus contraignant.
+    if mass_land_denial or count >= 4:
         bracket = {"min": 4, "max": 5, "label": "Bracket 4-5 (optimized / cEDH)"}
+    elif count >= 1 or winning_combos:
+        bracket = {"min": 3, "max": 3, "label": "Bracket 3 (upgraded)"}
+    elif extra_turns:
+        bracket = {"min": 2, "max": 2, "label": "Bracket 2 (core)"}
+    else:
+        bracket = {"min": 1, "max": 2, "label": "Bracket 1-2 (exhibition / core)"}
+
+    raisons = []
+    if mass_land_denial:
+        raisons.append(
+            f"{len(mass_land_denial)} carte(s) de destruction de terrains de masse, "
+            "interdites jusqu'au bracket 3 inclus"
+        )
+    if count:
+        raisons.append(f"{count} Game Changer(s)")
+    if winning_combos:
+        raisons.append(f"{len(winning_combos)} combo(s) à deux cartes qui gagne(nt) la partie")
+    if extra_turns and bracket["min"] <= 2:
+        raisons.append(
+            f"{len(extra_turns)} carte(s) de tour supplémentaire, que le bracket 1 interdit"
+        )
 
     role_counts = categories.count_by_category(cards)
     qualitative = {
         "tutors": role_counts.get(categories.TUTOR, 0),
-        "extra_turns": sum(c["quantity"] for c in cards
-                           if categories.EXTRA_TURN in (c.get("categories") or [])),
         "stax": sum(c["quantity"] for c in cards
                     if categories.STAX in (c.get("categories") or [])),
     }
@@ -444,13 +479,20 @@ def bracket_estimate(cards: list[dict], combos: list[dict] | None = None) -> dic
         **bracket,
         "two_card_combos": combos,
         "winning_combo_count": len(winning_combos),
+        "mass_land_denial": mass_land_denial,
+        "extra_turns": extra_turns,
+        "floor_reasons": raisons,
         "qualitative_signals": qualitative,
         "note": (
-            "Plancher calculé sur les Game Changers et sur les combos à deux "
-            "cartes qui gagnent la partie (interdits aux brackets 1-2). Le "
-            "système officiel demande en plus qu'un tel combo reste un plan de "
-            "fin de partie : compare son mana total au ramp du deck. Les "
-            "signaux ci-contre (tuteurs, tours supplémentaires, stax) comptent "
-            "aussi mais ne sont pas automatisables : à toi de trancher."
+            "Plancher calculé sur quatre critères officiels : Game Changers, "
+            "combos à deux cartes qui gagnent la partie, destruction de "
+            "terrains de masse (interdite jusqu'au bracket 3) et tours "
+            "supplémentaires (interdits au bracket 1). Deux choses restent à "
+            "toi : vérifier qu'un combo est bien un plan de fin de partie en "
+            "comparant son mana total au ramp du deck, et juger si les tours "
+            "supplémentaires s'enchaînent — les brackets 2 et 3 ne "
+            "l'interdisent que dans ce cas. Le stax et les tuteurs sont "
+            "affichés mais ne pèsent pas : le stax n'est pas un critère "
+            "officiel, et la densité de tuteurs n'a pas de seuil chiffré."
         ),
     }
