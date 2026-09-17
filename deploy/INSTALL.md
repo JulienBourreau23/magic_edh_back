@@ -139,7 +139,7 @@ réindente ce qu'on lui donne et casse le YAML).
 | Flow | Ce qu'il synchronise | Comment | Quand |
 |---|---|---|---|
 | `sync-scryfall.yml` | `cards` puis `card_names_fr` | SSH | 1er du mois, 2 h |
-| `sync-edhrec.yml` | recommandations, archétypes | HTTP | lundi 4 h |
+| `sync-edhrec.yml` | recommandations, archétypes | SSH | lundi 4 h |
 | `sync-combos.yml` | catalogue Spellbook | HTTP | lundi 5 h |
 
 ### KV Store du namespace `mtg-edh`
@@ -173,8 +173,9 @@ logs est coupé et l'UI annonce l'instance injoignable alors qu'elle travaille.
 
 ### Accès SSH de Kestra (`deploy/kestra-sync.sh`)
 
-Les deux syncs lourdes passent par SSH parce qu'elles durent plusieurs minutes
-et téléchargent 470 Mo ; les deux courtes restent en HTTP. Kestra n'obtient pas
+Les syncs longues passent par SSH parce qu'un endpoint synchrone resté muet
+plusieurs minutes se fait couper par Kestra. Seule celle des combos, qui tient
+en deux minutes, reste en HTTP. Kestra n'obtient pas
 de shell pour autant :
 
 ```bash

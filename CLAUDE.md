@@ -517,15 +517,20 @@ le même travail finirait par être lancé deux fois.
 | Flow | Syncs | Déclenchement | Planification |
 |---|---|---|---|
 | `sync-scryfall.yml` | `cards`, puis `card_names_fr` | SSH | 1er du mois, 2 h |
-| `sync-edhrec.yml` | recommandations et archétypes | HTTP | lundi 4 h |
+| `sync-edhrec.yml` | recommandations et archétypes | SSH | lundi 4 h |
 | `sync-combos.yml` | catalogue Spellbook | HTTP | lundi 5 h |
 
-**Le choix HTTP / SSH suit la durée, pas la préférence.** EDHREC et Spellbook
-tiennent en une à deux minutes : l'appel HTTP synchrone rend un vrai code de
-retour à l'ordonnanceur, c'est le plus simple. Scryfall et les noms français
-durent plusieurs minutes et téléchargent 470 Mo à eux deux ; un endpoint HTTP
-bloquant aussi longtemps serait fragile pour le même service rendu, alors que
-les scripts CLI existent déjà.
+**Le choix HTTP / SSH suit la durée, pas la préférence**, et ce n'est pas un
+choix figé : EDHREC est passé de HTTP à SSH le jour où la collection a franchi
+la centaine de commandants. Un endpoint synchrone ne renvoie rien avant la fin,
+donc Kestra compte toute la durée comme de l'inactivité et coupe à
+`readIdleTimeout`. Au-delà de quelques minutes, le HTTP n'est plus tenable.
+
+**Le coût d'EDHREC croît avec la collection** : une requête par commandant
+**et par archétype**, pause d'une seconde entre chaque. À 36 commandants, une
+minute ; à 131, seize. Le seuil sera franchi de nouveau — et à terme c'est la
+stratégie qu'il faudra revoir, pas le transport : le flow refetche chaque
+semaine des centaines de pages qui n'ont pas bougé.
 
 **Kestra n'a pas de shell sur le back.** Sa clé publique est posée dans
 `authorized_keys` avec `command="…/deploy/kestra-sync.sh"`, qui force ce script
