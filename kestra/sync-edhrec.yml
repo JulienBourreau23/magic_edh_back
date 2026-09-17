@@ -1,0 +1,77 @@
+# Flow Kestra — rafraîchissement des recommandations EDHREC.
+#
+# Kestra tourne dans son propre LXC, le code et la base dans un autre : plutôt
+# que d'y dupliquer le dépôt, un venv et les identifiants Postgres, le flow
+# appelle l'endpoint d'administration du back. Kestra fait ce qu'il fait bien —
+# planifier, réessayer, alerter — et le travail reste au même endroit que le
+# reste de la logique.
+#
+# La même synchronisation est lançable en ligne de commande :
+#   python scripts/sync_edhrec.py
+# L'ordonnanceur est donc interchangeable ; rien ici n'est indispensable.
+#
+# Prérequis dans Kestra (Namespace > KV Store) :
+#   magic_edh_api_url   http://192.168.1.143:8000
+#   magic_edh_user      ton identifiant
+#   magic_edh_password  ton mot de passe
+#
+# L'URL est interne et non publique, volontairement : /admin/sync-edhrec est
+# synchrone et boucle sur les commandants avec une pause entre chaque requête.
+# Derrière Cloudflare, la coupure à 100 s ferait échouer le flow (erreur 524)
+# dès quelques dizaines de commandants possédés. Kestra et le back sont sur le
+# même LAN, l'endpoint d'administration n'a donc aucune raison de sortir.
+#
+# Écrit pour Kestra 1.3.31 OSS : identifiants de tâches et forme du bloc
+# `options.timeout` vérifiés contre cette version.
+id: sync-edhrec
+namespace: mtg-edh
+
+description: |
+  Récupère les cartes qu'EDHREC voit jouées avec les commandants présents dans
+  la collection, pour alimenter la page « Quel deck monter ».
+
+tasks:
+  - id: login
+    type: io.kestra.plugin.core.http.Request
+    uri: "{{ kv('magic_edh_api_url') }}/auth/login"
+    method: POST
+    contentType: application/json
+    body: |
+      {"username": "{{ kv('magic_edh_user') }}", "password": "{{ kv('magic_edh_password') }}"}
+
+  - id: sync
+    type: io.kestra.plugin.core.http.Request
+    uri: "{{ kv('magic_edh_api_url') }}/admin/sync-edhrec?delay=1"
+    method: POST
+    headers:
+      Authorization: "Bearer {{ json(outputs.login.body).token }}"
+    # Une pause d'une seconde par commandant : quelques dizaines de commandants
+    # au plus, mais on laisse de la marge si la collection grossit.
+    # `readIdleTimeout` vit sous `timeout` depuis Kestra 1.x ; la forme à plat
+    # est encore acceptée mais dépréciée.
+    options:
+      timeout:
+        readIdleTimeout: PT10M
+
+  - id: resume
+    type: io.kestra.plugin.core.log.Log
+    message: |
+      {{ json(outputs.sync.body).synced }} commandant(s) synchronisé(s)
+      sur {{ json(outputs.sync.body).commanders_found }} trouvés :
+      {{ json(outputs.sync.body).recommendations_total }} recommandations,
+      {{ json(outputs.sync.body).themes_total }} archétypes.
+      Slugs non résolus : {{ json(outputs.sync.body).not_found }}
+      Échecs : {{ json(outputs.sync.body).failed }}
+
+triggers:
+  # EDHREC agrège des decks sur la durée : ses chiffres bougent lentement.
+  # Une fois par semaine suffit largement, et c'est plus poli qu'un quotidien.
+  - id: hebdomadaire
+    type: io.kestra.plugin.core.trigger.Schedule
+    cron: "0 4 * * 1"
+
+errors:
+  - id: alerte
+    type: io.kestra.plugin.core.log.Log
+    level: ERROR
+    message: "Échec de la synchronisation EDHREC — voir l'exécution {{ execution.id }}"

@@ -1,0 +1,62 @@
+# Flow Kestra — rafraîchissement du catalogue de combos à deux cartes.
+#
+# Même principe que `sync-edhrec.yml` : Kestra planifie, le back travaille. La
+# logique vit dans `services/spellbook.py`, lançable aussi en ligne de commande :
+#   python scripts/sync_combos.py
+#
+# Prérequis dans Kestra (Namespace > KV Store) : les mêmes clés que le flow
+# EDHREC (magic_edh_api_url, magic_edh_user, magic_edh_password).
+#
+# Écrit pour Kestra 1.3.31 OSS : identifiants de tâches et forme du bloc
+# `options.timeout` vérifiés contre cette version.
+id: sync-combos
+namespace: mtg-edh
+
+description: |
+  Réimporte depuis Commander Spellbook les combos à deux cartes, qui servent au
+  plancher de bracket : un combo infini à deux cartes qui gagne la partie est
+  interdit aux brackets 1-2, et ne se déduit pas du texte des cartes.
+
+tasks:
+  - id: login
+    type: io.kestra.plugin.core.http.Request
+    uri: "{{ kv('magic_edh_api_url') }}/auth/login"
+    method: POST
+    contentType: application/json
+    body: |
+      {"username": "{{ kv('magic_edh_user') }}", "password": "{{ kv('magic_edh_password') }}"}
+
+  - id: sync
+    type: io.kestra.plugin.core.http.Request
+    uri: "{{ kv('magic_edh_api_url') }}/admin/sync-combos?delay=2"
+    method: POST
+    headers:
+      Authorization: "Bearer {{ json(outputs.login.body).token }}"
+    # Une quarantaine de pages avec deux secondes de pause : compter ~2 minutes.
+    # Spellbook limite le débit (429) ; le back réessaie, d'où la marge.
+    # Sans ce réglage, Kestra coupe à 10 s et le flow échoue alors que le back
+    # travaille encore. `readIdleTimeout` vit sous `timeout` depuis Kestra 1.x —
+    # la forme à plat est encore acceptée mais dépréciée.
+    options:
+      timeout:
+        readIdleTimeout: PT10M
+
+  - id: resume
+    type: io.kestra.plugin.core.log.Log
+    message: |
+      {{ json(outputs.sync.body).stored }} combos enregistrés
+      ({{ json(outputs.sync.body).two_card_pairs }} paires lues,
+      {{ json(outputs.sync.body).ignored_unknown_cards }} ignorées faute de carte connue).
+
+triggers:
+  # Le catalogue grossit set par set : une fois par semaine suffit, décalé d'une
+  # heure par rapport au flow EDHREC pour ne pas lancer les deux ensemble.
+  - id: hebdomadaire
+    type: io.kestra.plugin.core.trigger.Schedule
+    cron: "0 5 * * 1"
+
+errors:
+  - id: alerte
+    type: io.kestra.plugin.core.log.Log
+    level: ERROR
+    message: "Échec de la synchronisation des combos — voir l'exécution {{ execution.id }}"

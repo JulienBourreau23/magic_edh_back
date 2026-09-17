@@ -21,7 +21,7 @@ git clone https://github.com/JulienBourreau23/magic_edh_back.git /opt/mtg-back/m
 cd /opt/mtg-back/magic_edh_back
 python3 -m venv venv
 venv/bin/pip install -r requirements.txt
-venv/bin/python -m pytest -q          # 125 tests doivent passer
+venv/bin/python -m pytest -q          # 144 tests doivent passer
 ```
 
 ## `.env`
@@ -65,6 +65,9 @@ Le rôle et la base `magic_edh` existent sur `lxc-pg18` (192.168.1.104,
 PostgreSQL 18.6), avec `pg_trgm` pour la recherche floue. Le schéma et les
 données ont été transférés depuis la base de développement plutôt que
 reconstruits : mêmes comptes à la ligne près.
+
+Comptes **au moment du transfert** (15 septembre 2026) ; ils bougent à chaque
+passage des flows de synchronisation.
 
 | Table | Lignes |
 |---|---|
@@ -120,3 +123,84 @@ curl -s localhost:8000/health
 ```
 
 Déploiements suivants : `./deploy.sh`.
+
+## Ordonnancement par Kestra
+
+Les synchronisations ne tournent **pas** par timer systemd : elles sont
+planifiées par l'instance Kestra de `lxc-kestra` (192.168.1.119:8080,
+Kestra 1.3.31 OSS), namespace `mtg-edh`. Les trois flows sont versionnés dans
+`kestra/` et se déposent par **Flows → Import** (le collage dans l'éditeur
+réindente ce qu'on lui donne et casse le YAML).
+
+| Flow | Ce qu'il synchronise | Comment | Quand |
+|---|---|---|---|
+| `sync-scryfall.yml` | `cards` puis `card_names_fr` | SSH | 1er du mois, 2 h |
+| `sync-edhrec.yml` | recommandations, archétypes | HTTP | lundi 4 h |
+| `sync-combos.yml` | catalogue Spellbook | HTTP | lundi 5 h |
+
+### KV Store du namespace `mtg-edh`
+
+Aucun identifiant ne vit dans les flows. Sept clés à créer dans
+**Namespaces → `mtg-edh` → KV Store** — le namespace n'apparaît qu'une fois un
+premier flow déposé, donc importer d'abord, remplir ensuite.
+
+| Key | Valeur | Type |
+|---|---|---|
+| `magic_edh_api_url` | `http://192.168.1.143:8000` | STRING |
+| `magic_edh_user` | identifiant applicatif | STRING |
+| `magic_edh_password` | mot de passe applicatif | STRING |
+| `mtg_back_ssh_host` | `192.168.1.143` | STRING |
+| `mtg_back_ssh_port` | `52398` | NUMBER |
+| `mtg_back_ssh_user` | `julien` | STRING |
+| `mtg_back_ssh_key` | clé privée ed25519, les 8 lignes | STRING |
+
+`kv()` est résolu **à l'exécution, pas à la sauvegarde** : une clé manquante ou
+mal nommée ne se voit qu'au lancement, et Kestra s'arrête à la première — il
+faut donc les créer toutes avant de relancer. Les valeurs sont stockées en
+clair dans la base `kestra` ; pour le mot de passe applicatif, `secret()` et une
+variable `SECRET_MAGIC_EDH_PASSWORD` en base64 dans le `docker-compose.yml` de
+Kestra seraient plus propres.
+
+**L'URL de l'API est celle du LAN, jamais le domaine public** :
+`/admin/sync-edhrec` et `/admin/sync-combos` sont synchrones et dépassent les
+100 s que Cloudflare tolère. Même raison pour suivre une longue exécution
+depuis `http://192.168.1.119:8080` plutôt que par le domaine — sinon le flux de
+logs est coupé et l'UI annonce l'instance injoignable alors qu'elle travaille.
+
+### Accès SSH de Kestra (`deploy/kestra-sync.sh`)
+
+Les deux syncs lourdes passent par SSH parce qu'elles durent plusieurs minutes
+et téléchargent 470 Mo ; les deux courtes restent en HTTP. Kestra n'obtient pas
+de shell pour autant :
+
+```bash
+# Sur le poste d'administration, une paire dédiée (sans passphrase : Kestra
+# s'authentifie sans interaction).
+ssh-keygen -t ed25519 -N "" -C "kestra@lxc-kestra -> lxc-mtg-back" \
+    -f ~/.ssh/kestra_mtg_back
+
+# Sur lxc-mtg-back, la clé publique contrainte à un seul programme.
+# `command=` force ce script quelle que soit la commande demandée ; celle-ci
+# n'arrive que dans $SSH_ORIGINAL_COMMAND et sert d'aiguillage.
+cat >> ~/.ssh/authorized_keys <<KEY
+command="/opt/mtg-back/magic_edh_back/deploy/kestra-sync.sh",no-agent-forwarding,no-port-forwarding,no-user-rc,no-X11-forwarding ssh-ed25519 AAAA... kestra@lxc-kestra
+KEY
+chmod 600 ~/.ssh/authorized_keys
+chmod +x /opt/mtg-back/magic_edh_back/deploy/kestra-sync.sh
+```
+
+Vérification — avec cette seule clé, tout doit être refusé sauf les deux
+aiguillages. Attention à `IdentitiesOnly` : `-i` **s'ajoute** aux clés du
+`~/.ssh/config` au lieu de les remplacer, et le test réussirait avec la clé
+personnelle sans rien prouver.
+
+```bash
+ssh -o IdentitiesOnly=yes -i ~/.ssh/kestra_mtg_back \
+    -p 52398 -o ProxyJump=julienserveur-vpn julien@192.168.1.143 'whoami'
+# → Commande refusée : 'whoami'.  (code 2)
+```
+
+**Ajouter une synchronisation par SSH, c'est ajouter un `case` dans
+`kestra-sync.sh`**, pas seulement une tâche dans le flow. Le script y pose
+aussi `TMPDIR=/var/tmp` : `/tmp` est un tmpfs, et les ~400 Mo du bulk data
+`all_cards` y seraient écrits dans les 2 Go de RAM du conteneur.

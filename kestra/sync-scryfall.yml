@@ -1,0 +1,87 @@
+# Flow Kestra — rafraîchissement des données de cartes (Scryfall + noms français).
+#
+# Contrairement aux flows EDHREC et combos, celui-ci ne passe pas par un endpoint
+# HTTP mais par SSH. Raison : ces deux syncs durent plusieurs minutes chacune
+# (78 Mo de bulk data et ~99 500 impressions pour l'une, ~400 Mo lus en streaming
+# pour l'autre), et les scripts en ligne de commande existent déjà. Un endpoint
+# HTTP synchrone qui bloque un worker dix minutes serait plus fragile pour le
+# même service rendu.
+#
+# Kestra n'obtient pas de shell sur le back : sa clé publique est posée dans
+# `authorized_keys` avec `command="…/deploy/kestra-sync.sh"`, qui force ce script
+# quoi qu'il demande. Les seules valeurs acceptées sont `scryfall` et
+# `french-names` ; tout le reste sort en code 2. Voir `deploy/kestra-sync.sh`.
+#
+# Prérequis dans Kestra (Namespace > KV Store) :
+#   mtg_back_ssh_host   192.168.1.143            (STRING)
+#   mtg_back_ssh_port   52398                    (NUMBER — pas le port 22)
+#   mtg_back_ssh_user   julien                   (STRING)
+#   mtg_back_ssh_key    la clé privée ed25519    (STRING, multiligne)
+#
+# Écrit pour Kestra 1.3.31 OSS et le plugin `fs` 2.11.1 : identifiants de tâches
+# et noms de champs vérifiés contre ces versions.
+id: sync-scryfall
+namespace: mtg-edh
+
+description: |
+  Rafraîchit la table `cards` depuis le bulk data Scryfall, puis les alias
+  français de `card_names_fr`. À relancer après chaque sortie de set : c'est la
+  seule chose qui fasse apparaître les nouvelles cartes dans l'application.
+
+tasks:
+  - id: scryfall
+    type: io.kestra.plugin.fs.ssh.Command
+    host: "{{ kv('mtg_back_ssh_host') }}"
+    port: "{{ kv('mtg_back_ssh_port') }}"
+    username: "{{ kv('mtg_back_ssh_user') }}"
+    authMethod: PUBLIC_KEY
+    privateKey: "{{ kv('mtg_back_ssh_key') }}"
+    # Un seul mot : la clé étant contrainte par `command=`, ceci n'est pas une
+    # commande shell mais l'aiguillage lu par kestra-sync.sh.
+    commands:
+      - scryfall
+    # ~99 500 impressions, puis REFRESH MATERIALIZED VIEW cards_cheapest que le
+    # script fait lui-même. Compter quelques minutes ; la marge couvre un
+    # Scryfall lent.
+    timeout: PT45M
+    # Un retry a du sens ici, contrairement aux flows EDHREC et combos : la
+    # tâche est un téléchargement unique, pas une boucle sur des dizaines de
+    # pages d'un site communautaire. Une coupure réseau se rattrape, et rejouer
+    # le script entier est sans effet de bord (upsert sur scryfall_id).
+    retry:
+      type: constant
+      maxAttempt: 2
+      interval: PT10M
+
+  - id: noms_francais
+    type: io.kestra.plugin.fs.ssh.Command
+    host: "{{ kv('mtg_back_ssh_host') }}"
+    port: "{{ kv('mtg_back_ssh_port') }}"
+    username: "{{ kv('mtg_back_ssh_user') }}"
+    authMethod: PUBLIC_KEY
+    privateKey: "{{ kv('mtg_back_ssh_key') }}"
+    commands:
+      - french-names
+    # ~400 Mo téléchargés, lus en streaming. TMPDIR=/var/tmp est posé par
+    # kestra-sync.sh : sans lui le fichier atterrirait dans le tmpfs /tmp,
+    # c'est-à-dire dans les 2 Go de RAM du conteneur.
+    timeout: PT45M
+    retry:
+      type: constant
+      maxAttempt: 2
+      interval: PT10M
+
+triggers:
+  # Mensuel et non hebdomadaire : ces tables ne bougent qu'aux sorties de set,
+  # et c'est 470 Mo de téléchargement. Le 1er à 2 h, avant les flows EDHREC
+  # (lundi 4 h) et combos (lundi 5 h) — l'ordre compte, les recommandations
+  # EDHREC se joignent aux cartes par scryfall_id.
+  - id: mensuel
+    type: io.kestra.plugin.core.trigger.Schedule
+    cron: "0 2 1 * *"
+
+errors:
+  - id: alerte
+    type: io.kestra.plugin.core.log.Log
+    level: ERROR
+    message: "Échec de la synchronisation des cartes — voir l'exécution {{ execution.id }}"
