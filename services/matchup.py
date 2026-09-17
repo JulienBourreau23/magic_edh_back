@@ -113,7 +113,12 @@ def compare(deck_a: dict, cards_a: list[dict], deck_b: dict, cards_b: list[dict]
     starting_life = duel.DUEL_COMMANDER_LIFE if deck_a.get("format") == "duel" else duel.COMMANDER_LIFE
     return {"a": profile_a, "b": profile_b, "axes": axes, "wins": wins,
             "initiative": initiative(cards_a, cards_b, iterations, seed),
-            "duel": duel.simulate_duels(cards_a, cards_b, seed=seed, starting_life=starting_life),
+            # Les combos gagnants entrent dans le duel simulé : sans eux, un
+            # deck qui gagne par combo était joué comme s'il ne pouvait gagner
+            # qu'au combat, ce qui le sous-estimait par construction.
+            "duel": duel.simulate_duels(cards_a, cards_b, seed=seed,
+                                        starting_life=starting_life,
+                                        combos_a=combos_a, combos_b=combos_b),
             "verdict": _verdict(profile_a, profile_b, axes, wins)}
 
 

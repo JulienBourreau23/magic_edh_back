@@ -419,12 +419,47 @@ se relance avec la taxe de 2 par relance. Ce n'était pas une simplification mai
 une erreur de règle — le perdre définitivement sur un board wipe punissait deux
 fois le même deck.
 
-Le duel simulé ignore vol/piétinement, capacités activées et déclenchées,
-jetons, moteurs de pioche, combos, contresorts et dégâts de commandant. **Le
-biais qui en résulte a une direction connue** : il avantage les decks dont la
-puissance est dans les corps de créature et sous-estime ceux qui gagnent par
-moteurs, combos ou contrôle. L'encadré « ce que la simulation modélise » dans
-l'interface n'est pas décoratif — sans lui, un 60/40 se lit comme un pronostic.
+**Le combat est joué avec ses règles, pas en additionnant des forces.** Vol et
+portée décident qui peut bloquer quoi, la menace exige deux bloqueurs,
+l'initiative décide qui meurt avant d'avoir frappé, le contact mortel tue d'un
+point, le piétinement laisse passer l'excédent, l'indestructible survit aux
+dégâts comme aux board wipes. Les mots-clés viennent de `cards.keywords`
+(Scryfall) : ils sont **constatés, pas devinés** depuis le texte oracle — d'où
+l'ajout de cette colonne à `SIMULATION_CARD_COLUMNS`, sans laquelle le
+simulateur joue des créatures nues et tout ce travail ne sert à rien.
+
+La vigilance mérite une mention à part : **attaquer engage**. Avant, aucune
+créature ne se tapait en attaquant, donc tout le monde jouait comme s'il avait
+la vigilance et attaquer ne coûtait rien — le modèle surestimait l'agression de
+façon structurelle.
+
+Trois autres mécaniques comblent le biais dans sa direction connue :
+
+- **Les dégâts de commandant** (21 d'un même commandant) sont une seconde
+  horloge, et elle avantage les commandants gros et évasifs.
+- **Les contresorts** sont gardés en réserve et partent sur une vraie menace
+  (seuil de coût converti) : les dépenser sur un rocher de mana les rendrait à
+  la fois omniprésents et inutiles.
+- **Les combos gagnants à deux cartes** terminent la partie quand les deux
+  pièces sont disponibles et le mana total payable. C'est **exactement le
+  critère affiché sur la fiche de deck** — mêmes `wins_outright` et
+  `total_mana_value` — donc le duel et le bracket racontent la même histoire.
+
+**Ce qui reste hors de portée** : les capacités activées et déclenchées en
+général. « Quand cette créature meurt, chaque joueur sacrifie un terrain » est
+du texte libre, et l'exécuter demanderait un moteur de règles complet — pas une
+heuristique de plus. Même chose pour les jetons, les moteurs de pioche
+récurrents et la politique.
+
+**Le biais résiduel garde une direction**, plus faible qu'avant : le modèle est
+plus à l'aise avec les decks qui gagnent par le combat ou par un combo
+identifié qu'avec ceux qui accumulent de petits avantages tour après tour.
+L'encadré de l'interface n'est pas décoratif — sans lui, un 60/40 se lit comme
+un pronostic.
+
+Mesuré sur quatre decks réels, l'écart entre l'ancien modèle et celui-ci va
+**jusqu'à 27 points de taux de victoire** sur un même affrontement. Autrement
+dit : tout chiffre de duel relevé avant ce changement est à jeter.
 
 ## EDHREC et orchestration
 

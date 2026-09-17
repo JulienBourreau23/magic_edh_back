@@ -23,7 +23,13 @@ FRENCH_NAME_JOIN = "LEFT JOIN card_names_fr fr ON fr.oracle_id = c.oracle_id"
 # La simulation a besoin du texte oracle (quantité de mana produite par une
 # source : "Add {C}{C}") et des corps de créature pour le combat. Ces colonnes
 # ne sont jamais renvoyées au client.
-SIMULATION_CARD_COLUMNS = DECK_CARD_COLUMNS + ", c.oracle_text, c.power, c.toughness"
+SIMULATION_CARD_COLUMNS = (
+    DECK_CARD_COLUMNS
+    # `keywords` alimente le combat du duel simulé : vol, piétinement,
+    # initiative, contact mortel... Sans cette colonne, le simulateur joue des
+    # créatures nues et le travail sur les règles de combat ne sert à rien.
+    + ", c.oracle_text, c.power, c.toughness, c.keywords"
+)
 
 
 def create_deck(name: str, format: str = "commander") -> int:
