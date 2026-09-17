@@ -78,9 +78,11 @@ _SELECT = """
 
 def _legality_column(format: str) -> str:
     """
-    `legal_duel` est toujours plus restrictif que `legal_commander`, jamais
-    l'inverse : un Sol Ring domine le top des artefacts en multijoueur et n'a
-    rien à faire dans une liste d'achats pour du duel.
+    Le Duel Commander a sa propre banlist. Elle est majoritairement plus
+    stricte — un Sol Ring domine le top des artefacts en multijoueur et n'a
+    rien à faire dans une liste d'achats pour du duel — mais ce n'est **pas**
+    un sur-ensemble : quelques cartes bannies en multijoueur y sont légales.
+    D'où une colonne par format, jamais déduite de l'autre.
     """
     return "c.legal_duel" if format == "duel" else "c.legal_commander"
 

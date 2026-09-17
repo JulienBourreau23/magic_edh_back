@@ -74,10 +74,25 @@ def test_le_vivier_exclut_les_terrains_de_base_et_le_commandant():
     assert str(oracle_id) not in {str(card["oracle_id"]) for card in pool}
 
 
-def test_le_duel_est_plus_restrictif_que_le_multi():
-    # Duel Commander bannit ce que le multi autorise (Sol Ring, Ancient Tomb) ;
-    # l'inverse n'existe pas. Le vivier duel est donc un sous-ensemble.
+def test_chaque_vivier_respecte_la_banlist_de_son_format():
+    """
+    Ce test affirmait que le vivier duel est un **sous-ensemble** du vivier
+    multi, au motif que « le Duel Commander bannit ce que le multi autorise, et
+    jamais l'inverse ». C'est faux, et la base le prouve : dix-neuf cartes sont
+    bannies en Commander multijoueur et légales en duel — Sylvan Primordial,
+    Primeval Titan, Sundering Titan, et cinq créatures légendaires dont
+    Griselbrand et Leovold.
+
+    L'hypothèse avait tenu par chance : le commandant tiré n'était pas vert,
+    donc aucune de ces cartes n'entrait dans son vivier.
+
+    Le vrai invariant n'est pas un emboîtement mais une appartenance : chaque
+    vivier ne contient que des cartes légales dans **son** format.
+    """
     oracle_id, theme, identity = _un_commandant()
-    multi = {str(c["oracle_id"]) for c in themes_db.build_pool(oracle_id, theme, "commander", identity)}
-    duel = {str(c["oracle_id"]) for c in themes_db.build_pool(oracle_id, theme, "duel", identity)}
-    assert duel <= multi
+
+    for format, colonne in (("commander", "legal_commander"), ("duel", "legal_duel")):
+        pool = themes_db.build_pool(oracle_id, theme, format, identity)
+        assert pool, f"vivier vide en {format}"
+        illégales = [c["name"] for c in pool if not c[colonne]]
+        assert illégales == [], f"{format} : {illégales[:5]}"

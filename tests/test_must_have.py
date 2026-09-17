@@ -85,8 +85,9 @@ def test_le_plafond_plus_bas_reduit_la_liste_et_augmente_le_compte_ecarte():
 
 
 def test_le_duel_est_plus_restrictif_que_le_multi():
-    # `legal_duel` est toujours plus restrictif que `legal_commander`, jamais
-    # l'inverse. Sol Ring est le cas d'école : premier des artefacts en
+    # La banlist du duel est majoritairement plus stricte, sans être un
+    # sur-ensemble : quelques cartes bannies en multijoueur y sont légales.
+    # Sol Ring est le cas d'école du sens courant : premier des artefacts en
     # multijoueur, banni en duel.
     multi = {c["oracle_id"] for c in _toutes_les_cartes(must_have(format="commander"))}
     duel = {c["oracle_id"] for c in _toutes_les_cartes(must_have(format="duel"))}

@@ -719,9 +719,20 @@ et le classement des cartes est le taux d'inclusion mesuré sur ces decks-là
 
 **Trois filtres durs, appliqués en SQL avant tout le reste** : la banlist du
 format, l'identité de couleur, les terrains de base. `legal_duel` est toujours
-plus restrictif que `legal_commander`, jamais l'inverse — un test le fige, et
-la légalité du commandant est vérifiée avant de construire 99 cartes autour de
+**pas** un sur-ensemble de `legal_commander` : le Duel Commander a sa propre
+banlist, majoritairement plus stricte, mais **dix-neuf cartes sont bannies en
+multijoueur et légales en duel** — Sylvan Primordial, Primeval Titan, Sundering
+Titan, et cinq créatures légendaires dont Griselbrand et Leovold. Chaque écran
+choisit donc la colonne de son format et n'en déduit jamais l'autre. La
+légalité du commandant est vérifiée avant de construire 99 cartes autour de
 lui.
+
+**Conséquence connue et non corrigée** : `IS_COMMANDER_CLAUSE`
+(`db/commanders.py`) et le sync EDHREC filtrent sur `legal_commander` en dur.
+Un commandant légal en duel seulement — Rofellos, Iona, Leovold, Erayo,
+Griselbrand — n'apparaîtrait donc jamais dans les commandants possédés, même
+pour monter un deck de duel. Le rendre correct demanderait de propager le
+format jusqu'à `/deck-ideas`, `/deck-plans` et `/competitive`.
 
 Deux choix qui ne sont pas des détails :
 
