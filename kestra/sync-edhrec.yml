@@ -1,67 +1,49 @@
 # Flow Kestra — rafraîchissement des recommandations EDHREC.
 #
-# Kestra tourne dans son propre LXC, le code et la base dans un autre : plutôt
-# que d'y dupliquer le dépôt, un venv et les identifiants Postgres, le flow
-# appelle l'endpoint d'administration du back. Kestra fait ce qu'il fait bien —
-# planifier, réessayer, alerter — et le travail reste au même endroit que le
-# reste de la logique.
+# **Passé de HTTP à SSH** le jour où la collection a franchi la centaine de
+# commandants. Le sync fait une requête par commandant **et par archétype**,
+# avec une pause d'une seconde entre chaque par politesse envers un site
+# communautaire gratuit : à 36 commandants il tenait en une minute, à 131 il en
+# demande seize. L'endpoint HTTP `/admin/sync-edhrec` est synchrone et ne
+# renvoie rien avant la fin, donc Kestra comptait ces seize minutes comme de
+# l'inactivité et coupait la connexion à dix.
 #
-# La même synchronisation est lançable en ligne de commande :
-#   python scripts/sync_edhrec.py
-# L'ordonnanceur est donc interchangeable ; rien ici n'est indispensable.
+# Ce n'était pas un bug mais un seuil franchi, et il le sera de nouveau : le
+# coût croît avec la collection. D'où le passage au mécanisme prévu pour ça.
 #
-# Prérequis dans Kestra (Namespace > KV Store) :
-#   magic_edh_api_url   http://192.168.1.143:8000
-#   magic_edh_user      ton identifiant
-#   magic_edh_password  ton mot de passe
+# L'endpoint HTTP reste en place — même implémentation dans `services/edhrec.py`,
+# utilisable à la main sur une petite collection.
 #
-# L'URL est interne et non publique, volontairement : /admin/sync-edhrec est
-# synchrone et boucle sur les commandants avec une pause entre chaque requête.
-# Derrière Cloudflare, la coupure à 100 s ferait échouer le flow (erreur 524)
-# dès quelques dizaines de commandants possédés. Kestra et le back sont sur le
-# même LAN, l'endpoint d'administration n'a donc aucune raison de sortir.
+# Prérequis dans Kestra (Namespace > KV Store) : les mêmes clés SSH que le flow
+# Scryfall (mtg_back_ssh_host, _port, _user, _key).
 #
-# Écrit pour Kestra 1.3.31 OSS : identifiants de tâches et forme du bloc
-# `options.timeout` vérifiés contre cette version.
+# Écrit pour Kestra 1.3.31 OSS et le plugin `fs` 2.11.1.
 id: sync-edhrec
 namespace: mtg-edh
 
 description: |
   Récupère les cartes qu'EDHREC voit jouées avec les commandants présents dans
-  la collection, pour alimenter la page « Quel deck monter ».
+  la collection, et les archétypes de chacun. Alimente « Quel deck monter » et
+  la construction de deck compétitif.
 
 tasks:
-  - id: login
-    type: io.kestra.plugin.core.http.Request
-    uri: "{{ kv('magic_edh_api_url') }}/auth/login"
-    method: POST
-    contentType: application/json
-    body: |
-      {"username": "{{ kv('magic_edh_user') }}", "password": "{{ kv('magic_edh_password') }}"}
-
-  - id: sync
-    type: io.kestra.plugin.core.http.Request
-    uri: "{{ kv('magic_edh_api_url') }}/admin/sync-edhrec?delay=1"
-    method: POST
-    headers:
-      Authorization: "Bearer {{ json(outputs.login.body).token }}"
-    # Une pause d'une seconde par commandant : quelques dizaines de commandants
-    # au plus, mais on laisse de la marge si la collection grossit.
-    # `readIdleTimeout` vit sous `timeout` depuis Kestra 1.x ; la forme à plat
-    # est encore acceptée mais dépréciée.
-    options:
-      timeout:
-        readIdleTimeout: PT10M
-
-  - id: resume
-    type: io.kestra.plugin.core.log.Log
-    message: |
-      {{ json(outputs.sync.body).synced }} commandant(s) synchronisé(s)
-      sur {{ json(outputs.sync.body).commanders_found }} trouvés :
-      {{ json(outputs.sync.body).recommendations_total }} recommandations,
-      {{ json(outputs.sync.body).themes_total }} archétypes.
-      Slugs non résolus : {{ json(outputs.sync.body).not_found }}
-      Échecs : {{ json(outputs.sync.body).failed }}
+  - id: edhrec
+    type: io.kestra.plugin.fs.ssh.Command
+    host: "{{ kv('mtg_back_ssh_host') }}"
+    port: "{{ kv('mtg_back_ssh_port') }}"
+    username: "{{ kv('mtg_back_ssh_user') }}"
+    authMethod: PUBLIC_KEY
+    privateKey: "{{ kv('mtg_back_ssh_key') }}"
+    # Un seul mot : la clé étant contrainte par `command=`, ceci n'est pas une
+    # commande shell mais l'aiguillage lu par kestra-sync.sh.
+    commands:
+      - edhrec
+    # Large devant les seize minutes actuelles : la durée suit la collection,
+    # et on préfère une marge à un flow qui casse au prochain palier.
+    timeout: PT45M
+    # Pas de retry : la tâche n'est pas une requête unique mais des centaines
+    # d'appels à un site communautaire gratuit. La rejouer entière pour un
+    # échec passager doublerait la visite.
 
 triggers:
   # EDHREC agrège des decks sur la durée : ses chiffres bougent lentement.
