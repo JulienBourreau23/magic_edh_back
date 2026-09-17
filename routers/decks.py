@@ -5,6 +5,7 @@ from fastapi import APIRouter, HTTPException, Query
 from pydantic import BaseModel, Field
 
 import db.decks as decks_db
+import db.commanders as commanders_db
 import db.ignored as ignored_db
 import services.card_images as card_images
 from services import combos, deck_analysis, simulation, suggestions
@@ -59,6 +60,16 @@ def list_decks():
     return decks_db.list_decks()
 
 
+def _synergies(cards: list[dict]) -> list[dict]:
+    commander = next((c for c in cards if c.get("is_commander")), None)
+    if commander is None:
+        return []
+    return commanders_db.synergies_for_deck(
+        str(commander["oracle_id"]),
+        [str(card["oracle_id"]) for card in cards if not card.get("is_commander")],
+    )
+
+
 @router.get("/{deck_id}")
 def get_deck(deck_id: int):
     deck = _load_deck(deck_id)
@@ -73,6 +84,10 @@ def get_deck(deck_id: int):
         "total_price_eur": deck_analysis.total_price_eur(cards),
         "legality_warnings": deck_analysis.legality_warnings(cards, deck["format"]),
         "bracket": deck_analysis.bracket_estimate(cards, combos.find_in_deck(cards)),
+        # Ce qu'EDHREC voit particulièrement associé à ce commandant, parmi les
+        # cartes du deck. Vide si le commandant n'a pas de données : il n'est
+        # pas dans la collection, ou la synchro n'a pas encore tourné.
+        "synergies": _synergies(cards),
         "manabase": deck_analysis.manabase(cards, deep=True),
         "role_diagnostics": deck_analysis.role_diagnostics(cards),
     }

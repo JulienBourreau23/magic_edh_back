@@ -899,6 +899,36 @@ Refuser relance le calcul côté client, là où `/must-have` se contente d'une 
 seul le moteur peut la désigner.
 
 
+### Combos expliqués et synergies (fiche de deck)
+
+La fiche de deck ne se contente plus d'annoncer un combo, elle dit **comment on
+le joue** : Spellbook publie les étapes (`description`) et les prérequis, qu'on
+jetait. « Infinite damage » ne dit pas quelle carte lancer en premier ni combien
+de fois répéter la boucle — sans les étapes, on annonce au joueur un combo qu'il
+ne sait pas exécuter. Migration 016, puis `sync_combos.py` : la colonne naît
+vide, seule une resynchronisation la remplit.
+
+L'encadré de bracket n'en garde que le **compte**, la liste détaillée vivant
+plus bas : le bracket a besoin de savoir *combien* de combos gagnent la partie,
+pas de les raconter.
+
+**La synergie n'est pas la popularité, et c'est tout l'intérêt.** EDHREC la
+définit comme l'écart entre « jouée avec ce commandant » et « jouée dans cette
+couleur en général ». Sol Ring est dans presque tous les decks : sa synergie
+avoisine zéro partout. Une carte de niche jouée surtout ici monte à +0,85.
+Classer par popularité ferait remonter les mêmes dix cartes sur les six decks ;
+classer par synergie désigne ce qui est là **pour ce commandant-là**. Un test le
+fige en vérifiant que Sol Ring n'arrive jamais en tête.
+
+Les valeurs **négatives** sont conservées et affichées : une carte moins jouée
+ici qu'ailleurs est une information, souvent le signe qu'elle n'est pas à sa
+place.
+
+La liste est **vide** quand le commandant n'a pas de données EDHREC — il n'est
+pas dans la collection, ou la synchro n'a pas tourné — et l'interface masque
+alors la section plutôt que d'afficher un tableau vide.
+
+
 ### Essayer un archétype sans acheter (`/deck-ideas/[id]`)
 
 Ouvrir une idée de deck donne la liste que les joueurs d'EDHREC montent

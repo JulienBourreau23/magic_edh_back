@@ -35,6 +35,7 @@ def _summarize(card: dict) -> dict:
         "categories": card.get("categories") or [],
         "edhrec_rank": card.get("edhrec_rank"),
         "owned_quantity": card.get("owned_quantity") or 0,
+        "wanted_quantity": card.get("wanted_quantity") or 0,
     }
 
 

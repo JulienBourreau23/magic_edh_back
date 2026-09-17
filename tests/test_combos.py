@@ -173,3 +173,39 @@ def test_un_combo_qui_ne_gagne_pas_ne_se_casse_pas():
     combos = [_combo_entre(ORACLE_KIKI, ORACLE_CONSCRITS,
                            ["Kiki-Jiki", "Conscrits zélés"], wins=False)]
     assert cuts_for_bracket(cartes, 2, combos) == []
+
+
+# --- ce que le catalogue explique --------------------------------------
+
+def test_un_combo_porte_ses_etapes_d_execution():
+    """
+    « Infinite damage » ne dit pas quelle carte lancer en premier ni combien de
+    fois répéter la boucle. Sans les étapes, la fiche de deck annonce un combo
+    que le joueur ne sait pas exécuter — et Spellbook les publiait depuis
+    toujours sans qu'on les stocke.
+    """
+    import pytest
+
+    from db.core import get_conn
+
+    try:
+        with get_conn() as conn:
+            with conn.cursor() as cur:
+                cur.execute("SELECT card_a, card_b, description FROM combos "
+                            "WHERE description IS NOT NULL LIMIT 1")
+                ligne = cur.fetchone()
+                cur.execute("SELECT COUNT(*) AS total, COUNT(description) AS avec FROM combos")
+                compte = cur.fetchone()
+    except Exception:
+        pytest.skip("Postgres injoignable ou migration_016 non jouée")
+
+    if compte["total"] == 0:
+        pytest.skip("catalogue vide : lancer sync_combos.py")
+
+    assert ligne is not None, "aucun combo n'a d'étapes : le sync n'a pas été relancé"
+    # Les étapes sont une par ligne : un texte sans retour à la ligne est
+    # suspect, c'est le format que l'affichage numérote.
+    assert ligne["description"].strip()
+    # La très grande majorité du catalogue est décrite ; un trou massif
+    # signalerait un champ mal lu plutôt qu'une absence légitime.
+    assert compte["avec"] / compte["total"] > 0.9

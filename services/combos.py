@@ -33,6 +33,11 @@ def _describe(row: dict, by_oracle: dict[str, dict]) -> dict:
                                 + (row["mana_value_needed"] or 0)),
         "bracket_tag": row["bracket_tag"],
         "popularity": row["popularity"],
+        # Comment on l'exécute, et ce qu'il suppose en place. « Infinite
+        # damage » ne dit pas quelle carte lancer en premier : sans les
+        # étapes, la fiche annonce un combo que le joueur ne sait pas jouer.
+        "description": row.get("description"),
+        "prerequisites": row.get("prerequisites"),
     }
 
 

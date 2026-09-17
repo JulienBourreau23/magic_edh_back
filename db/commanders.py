@@ -37,7 +37,8 @@ RECOMMENDATION_COLUMNS_OWNED = """
     c.oracle_id, c.scryfall_id, c.name, fr.printed_name AS name_fr,
     c.type_line, c.mana_cost, c.cmc, c.color_identity, c.price_eur,
     c.image_uri, c.image_downloaded, c.categories, c.game_changer,
-    c.edhrec_rank, col.quantity AS owned_quantity
+    c.edhrec_rank, col.quantity AS owned_quantity,
+    COALESCE(w.quantity, 0) AS wanted_quantity
 """
 
 RECOMMENDATION_COLUMNS = """
@@ -45,7 +46,11 @@ RECOMMENDATION_COLUMNS = """
     c.type_line, c.mana_cost, c.cmc, c.color_identity, c.price_eur,
     c.image_uri, c.image_downloaded, c.categories, c.game_changer,
     r.section, r.synergy, r.inclusion_rate,
-    COALESCE(col.quantity, 0) AS owned_quantity
+    COALESCE(col.quantity, 0) AS owned_quantity,
+    -- Ce qui est déjà cherché : le bouton « + recherche » doit se désactiver
+    -- plutôt que d'ajouter un second exemplaire en silence, les quantités
+    -- s'additionnant en base.
+    COALESCE(w.quantity, 0) AS wanted_quantity
 """
 
 
@@ -107,6 +112,7 @@ def recommendation_pool(commander_oracle_ids: list[str]) -> dict[str, list[dict]
                 JOIN cards_cheapest c ON c.oracle_id = r.card_oracle_id
                 LEFT JOIN card_names_fr fr ON fr.oracle_id = c.oracle_id
                 LEFT JOIN collection col ON col.oracle_id = c.oracle_id
+                LEFT JOIN wishlist w ON w.oracle_id = c.oracle_id
                 WHERE r.commander_oracle_id = ANY(%(commanders)s::uuid[])
                   AND c.type_line NOT LIKE 'Basic Land%%'
                 ORDER BY r.commander_oracle_id, c.oracle_id, r.inclusion_rate DESC NULLS LAST
@@ -172,6 +178,7 @@ def owned_pool(identity: list[str], exclude_oracle_ids: list[str],
                 FROM collection col
                 JOIN cards_cheapest c ON c.oracle_id = col.oracle_id
                 LEFT JOIN card_names_fr fr ON fr.oracle_id = c.oracle_id
+                LEFT JOIN wishlist w ON w.oracle_id = c.oracle_id
                 WHERE c.{legality}
                   AND c.color_identity <@ %(identity)s::text[]
                   AND NOT (c.oracle_id = ANY(%(exclude)s::uuid[]))
@@ -179,5 +186,41 @@ def owned_pool(identity: list[str], exclude_oracle_ids: list[str],
                 ORDER BY c.edhrec_rank NULLS LAST, c.name
                 """,
                 {"identity": sorted(identity), "exclude": exclude_oracle_ids},
+            )
+            return cur.fetchall()
+
+
+def synergies_for_deck(commander_oracle_id: str, oracle_ids: list[str]) -> list[dict]:
+    """
+    Les cartes du deck qu'EDHREC voit **particulièrement** associées à ce
+    commandant, la plus synergique d'abord.
+
+    La synergie n'est pas la popularité : c'est l'écart entre « jouée dans les
+    decks de ce commandant » et « jouée dans les decks de cette couleur en
+    général ». Sol Ring est dans tous les decks et n'a donc aucune synergie
+    avec personne ; une carte de niche jouée surtout ici en a beaucoup. C'est
+    ce qui distingue « bonne carte » de « carte de ce deck-là ».
+
+    Les valeurs négatives sont conservées : une carte moins jouée ici
+    qu'ailleurs est une information, pas une erreur — c'est souvent le signe
+    qu'elle n'est pas à sa place.
+    """
+    if not oracle_ids:
+        return []
+    with get_conn() as conn:
+        with conn.cursor() as cur:
+            cur.execute(
+                """
+                SELECT c.oracle_id, c.scryfall_id, c.name, fr.printed_name AS name_fr,
+                       c.type_line, c.mana_cost, c.image_uri, c.image_downloaded,
+                       r.synergy, r.inclusion_rate, r.section
+                FROM commander_recommendations r
+                JOIN cards_cheapest c ON c.oracle_id = r.card_oracle_id
+                LEFT JOIN card_names_fr fr ON fr.oracle_id = c.oracle_id
+                WHERE r.commander_oracle_id = %(commander)s
+                  AND r.card_oracle_id = ANY(%(cards)s::uuid[])
+                ORDER BY r.synergy DESC NULLS LAST
+                """,
+                {"commander": commander_oracle_id, "cards": oracle_ids},
             )
             return cur.fetchall()

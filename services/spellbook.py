@@ -111,7 +111,28 @@ def to_row(variant: dict) -> tuple | None:
         wins_outright(produces), variant.get("manaNeeded"),
         variant.get("manaValueNeeded"), variant.get("bracketTag"),
         variant.get("popularity"),
+        _clean(variant.get("description")),
+        _prerequisites(variant),
     )
+
+
+def _clean(value: str | None) -> str | None:
+    """Une chaîne vide n'est pas une information : elle vaut NULL."""
+    text = (value or "").strip()
+    return text or None
+
+
+def _prerequisites(variant: dict) -> str | None:
+    """
+    Ce qu'il faut avoir en place avant de lancer le combo. Spellbook sépare les
+    conditions banales (« avoir du mana ») des notables (« un autre elfe sur le
+    champ de bataille ») : on les concatène, l'affichage n'a pas à trancher
+    entre les deux.
+    """
+    morceaux = [_clean(variant.get("easyPrerequisites")),
+                _clean(variant.get("notablePrerequisites"))]
+    joint = "\n".join(m for m in morceaux if m)
+    return joint or None
 
 
 def _get_with_backoff(client: httpx.Client, url: str, params: dict | None, delay: float):
@@ -168,7 +189,8 @@ def store(rows: list[tuple]) -> tuple[int, int]:
                     """
                     INSERT INTO combos (variant_id, oracle_id_a, oracle_id_b, card_a, card_b,
                                         produces, wins_outright, mana_needed,
-                                        mana_value_needed, bracket_tag, popularity)
+                                        mana_value_needed, bracket_tag, popularity,
+                                        description, prerequisites)
                     VALUES %s
                     ON CONFLICT (variant_id) DO NOTHING
                     """,

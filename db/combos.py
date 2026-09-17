@@ -17,7 +17,8 @@ def find_pairs(oracle_ids: list[str]) -> list[dict]:
             cur.execute(
                 """
                 SELECT variant_id, oracle_id_a, oracle_id_b, card_a, card_b, produces,
-                       wins_outright, mana_needed, mana_value_needed, bracket_tag, popularity
+                       wins_outright, mana_needed, mana_value_needed, bracket_tag, popularity,
+                       description, prerequisites
                 FROM combos
                 WHERE oracle_id_a = ANY(%(ids)s::uuid[])
                   AND oracle_id_b = ANY(%(ids)s::uuid[])

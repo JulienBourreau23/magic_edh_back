@@ -21,7 +21,7 @@ git clone https://github.com/JulienBourreau23/magic_edh_back.git /opt/mtg-back/m
 cd /opt/mtg-back/magic_edh_back
 python3 -m venv venv
 venv/bin/pip install -r requirements.txt
-venv/bin/python -m pytest -q          # 210 tests doivent passer
+venv/bin/python -m pytest -q          # 213 tests doivent passer
 ```
 
 ## `.env`
@@ -50,6 +50,8 @@ psql -h 192.168.1.104 -U julien -d magic_edh -f scripts/migration_014_ignored_ca
 psql -h 192.168.1.104 -U julien -d magic_edh -f scripts/migration_015_banned_as_commander.sql
 psql -h 192.168.1.104 -U julien -d magic_edh -f scripts/rebuild_cheapest_view.sql   # obligatoire après le ADD COLUMN
 venv/bin/python scripts/sync_scryfall.py          # seule façon de peupler la nouvelle colonne
+psql -h 192.168.1.104 -U julien -d magic_edh -f scripts/migration_016_combo_description.sql
+venv/bin/python scripts/sync_combos.py            # idem : les étapes des combos
 ```
 
 `migration_011` crée `normalize_card_name()`, dont dépend la résolution des

@@ -94,3 +94,40 @@ def test_les_remplacants_portent_leur_role(detail):
     """
     assert any(card["categories"] for card in detail["substitutes"]), \
         "aucun remplaçant classé : le rôle ne pourrait jamais être respecté"
+
+
+def test_la_synergie_distingue_la_carte_du_deck_de_la_bonne_carte(detail):
+    """
+    La synergie EDHREC est l'écart entre « jouée avec ce commandant » et
+    « jouée dans cette couleur en général ». Sol Ring est partout, donc
+    synergique avec personne ; une carte de niche jouée surtout ici l'est
+    beaucoup. Confondre les deux ferait remonter les mêmes dix cartes sur
+    tous les decks.
+    """
+    import db.commanders as commanders_db
+
+    commandant = str(detail["commander"]["oracle_id"])
+    cartes = [str(c["oracle_id"]) for c in detail["core"]]
+    rangées = commanders_db.synergies_for_deck(commandant, cartes)
+    if not rangées:
+        pytest.skip("ce commandant n'a pas de données EDHREC")
+
+    # Classement décroissant : c'est ce que l'affichage suppose.
+    valeurs = [float(r["synergy"]) for r in rangées if r["synergy"] is not None]
+    assert valeurs == sorted(valeurs, reverse=True)
+
+    # Une carte ubiquitaire ne doit pas trôner en tête. Sol Ring est le témoin.
+    par_nom = {r["name"]: float(r["synergy"] or 0) for r in rangées}
+    if "Sol Ring" in par_nom and len(valeurs) > 3:
+        assert par_nom["Sol Ring"] < max(valeurs), \
+            "Sol Ring en tête des synergies : c'est la popularité qui est mesurée, pas la synergie"
+
+
+def test_aucune_synergie_sans_donnees_edhrec():
+    # Un commandant inconnu du catalogue ne doit pas faire échouer la fiche :
+    # la liste est vide, et l'interface masque la section.
+    import db.commanders as commanders_db
+
+    assert commanders_db.synergies_for_deck(
+        "00000000-0000-0000-0000-000000000000", ["00000000-0000-0000-0000-000000000001"]
+    ) == []
