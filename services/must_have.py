@@ -87,15 +87,28 @@ def _legality_column(format: str) -> str:
 
 def must_have(
     format: str = "commander",
-    max_price: float = DEFAULT_MAX_PRICE_EUR,
+    max_price: float | None = DEFAULT_MAX_PRICE_EUR,
 ) -> dict:
-    """Les cartes les plus jouées de chaque type, achetables sous le plafond."""
+    """
+    Les cartes les plus jouées de chaque type.
+
+    `max_price=None` retire le plafond : on obtient alors le classement **réel**,
+    sans filtre d'achat. C'est ce que demande le récapitulatif de collection, où
+    la question n'est pas « qu'est-ce que je peux acheter » mais « combien du
+    top est-ce que je possède ». Les deux lectures partagent la même requête,
+    pour qu'elles ne puissent pas diverger.
+    """
     legality = _legality_column(format)
 
-    # Ce qu'on affiche : possédé quel qu'en soit le prix, ou achetable.
-    achetable = _SELECT.format(legality=legality, no_basics=_EXCLUDE_BASICS) + """
+    if max_price is None:
+        condition = ""
+    else:
+        # Ce qu'on affiche : possédé quel qu'en soit le prix, ou achetable.
+        condition = """
       AND (col.quantity > 0
-           OR (c.price_eur IS NOT NULL AND c.price_eur <= %(max_price)s))
+           OR (c.price_eur IS NOT NULL AND c.price_eur <= %(max_price)s))"""
+
+    achetable = _SELECT.format(legality=legality, no_basics=_EXCLUDE_BASICS) + condition + """
     ORDER BY c.edhrec_rank
     LIMIT %(top)s
     """
@@ -124,14 +137,17 @@ def must_have(
             for type_def in TYPES:
                 params = {
                     "match": f"%{type_def['match']}%",
-                    "max_price": max_price,
+                    "max_price": max_price if max_price is not None else 0,
                     "top": type_def["top"],
                 }
                 cur.execute(achetable, params)
                 cards = cur.fetchall()
 
-                cur.execute(sans_plafond, params)
-                over_budget = cur.fetchone()["n"]
+                if max_price is None:
+                    over_budget = 0        # sans plafond, rien n'est écarté
+                else:
+                    cur.execute(sans_plafond, params)
+                    over_budget = cur.fetchone()["n"]
 
                 groups.append({
                     "key": type_def["key"],
@@ -147,4 +163,101 @@ def must_have(
         "format": format,
         "max_price_eur": max_price,
         "groups": groups,
+    }
+
+
+# Tranches de popularité EDHREC. Le rang est un classement, pas une note : la
+# distance entre le 1er et le 100e n'a rien à voir avec celle entre le 4000e et
+# le 4100e. D'où des tranches à bornes croissantes, et des libellés qui disent
+# ce que le rang signifie plutôt que le rang lui-même.
+RANK_BANDS: list[tuple[str, int | None, int | None]] = [
+    ("Incontournables (top 100)", None, 100),
+    ("Très jouées (101 – 500)", 101, 500),
+    ("Courantes (501 – 1500)", 501, 1500),
+    ("Occasionnelles (1501 – 5000)", 1501, 5000),
+    ("Rarement jouées (au-delà)", 5001, None),
+]
+
+
+def rank_distribution() -> list[dict]:
+    """
+    Combien de cartes possédées dans chaque tranche de popularité.
+
+    Les terrains de base sont hors collection par construction, donc absents
+    d'office. Les cartes sans rang EDHREC ne sont pas comptées : un rang absent
+    n'est pas un mauvais rang, c'est une absence de mesure — les ranger avec
+    les moins jouées inventerait une information.
+    """
+    cas = "\n".join(
+        f"WHEN {_band_condition(low, high)} THEN {index}"
+        for index, (_, low, high) in enumerate(RANK_BANDS)
+    )
+    with get_conn() as conn:
+        with conn.cursor() as cur:
+            cur.execute(f"""
+                SELECT bande, COUNT(*) AS cartes, COALESCE(SUM(quantity), 0) AS exemplaires
+                FROM (
+                    SELECT col.quantity,
+                           CASE {cas} END AS bande
+                    FROM collection col
+                    JOIN cards_cheapest c ON c.oracle_id = col.oracle_id
+                    WHERE c.edhrec_rank IS NOT NULL
+                ) t
+                WHERE bande IS NOT NULL
+                GROUP BY bande
+            """)
+            counts = {row["bande"]: row for row in cur.fetchall()}
+
+    return [
+        {
+            "label": label,
+            "cards": counts.get(index, {}).get("cartes", 0),
+            "copies": int(counts.get(index, {}).get("exemplaires", 0)),
+        }
+        for index, (label, _, _) in enumerate(RANK_BANDS)
+    ]
+
+
+def _band_condition(low: int | None, high: int | None) -> str:
+    if low is None:
+        return f"c.edhrec_rank <= {high}"
+    if high is None:
+        return f"c.edhrec_rank >= {low}"
+    return f"c.edhrec_rank BETWEEN {low} AND {high}"
+
+
+def coverage(format: str = "commander") -> dict:
+    """
+    Récapitulatif de collection : quelle part du classement réel est possédée,
+    type par type.
+
+    **Sans plafond de prix, volontairement.** La question n'est pas « qu'est-ce
+    que je peux acheter » — ça, c'est `/must-have` — mais « où en est ma
+    collection face à ce qui se joue ». Filtrer par prix répondrait à l'autre
+    question et gonflerait artificiellement la couverture, puisque les cartes
+    chères qu'on ne possède pas disparaîtraient du dénominateur.
+    """
+    import db.collection as collection_db
+
+    lists = must_have(format=format, max_price=None)
+    groups = []
+    for group in lists["groups"]:
+        owned = [card for card in group["cards"] if card["owned"] > 0]
+        groups.append({
+            "key": group["key"],
+            "label": group["label"],
+            # Le dénominateur est la taille **réelle** de la liste, pas la
+            # cible : les Batailles sont moins de cinquante en tout, et
+            # afficher « 0 / 50 » laisserait croire à un manque inexistant.
+            "listed": len(group["cards"]),
+            "target": group["top"],
+            "owned": len(owned),
+            "cards": group["cards"],
+        })
+
+    return {
+        "format": format,
+        "stats": collection_db.stats(),
+        "groups": groups,
+        "rank_distribution": rank_distribution(),
     }

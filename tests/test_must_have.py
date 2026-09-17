@@ -132,3 +132,57 @@ def test_ce_qui_est_deja_cherche_est_signale():
     # Et l'état revient bien à zéro une fois la carte retirée.
     rendu = {c["oracle_id"]: c["wanted"] for c in _toutes_les_cartes(must_have())}
     assert rendu[cible["oracle_id"]] == 0
+
+
+# --- récapitulatif de collection ------------------------------------------
+
+def test_le_recapitulatif_ignore_le_plafond_de_prix():
+    """
+    `/must-have` répond « qu'est-ce que je peux acheter », le récapitulatif
+    « où en est ma collection face à ce qui se joue ». Filtrer par prix ici
+    gonflerait la couverture : les cartes chères non possédées sortiraient du
+    dénominateur, donc le pourcentage monterait sans qu'on ait rien acquis.
+    """
+    from services.must_have import coverage
+
+    récap = coverage()
+    sous_plafond = must_have(max_price=1)
+
+    for groupe, filtré in zip(récap["groups"], sous_plafond["groups"]):
+        assert groupe["listed"] >= len(filtré["cards"]), groupe["label"]
+
+    # Une carte hors plafond doit bien figurer dans le récapitulatif.
+    chères = [c for g in récap["groups"] for c in g["cards"]
+              if c["owned"] == 0 and c["price_eur"] is not None and float(c["price_eur"]) > 50]
+    assert chères, "le classement réel devrait contenir des cartes au-dessus du plafond"
+
+
+def test_le_denominateur_est_la_taille_reelle_de_la_liste():
+    # Les Batailles sont moins de cinquante en tout : afficher « 0 / 50 »
+    # laisserait croire à un manque inexistant.
+    from services.must_have import coverage
+
+    for groupe in coverage()["groups"]:
+        assert groupe["listed"] == len(groupe["cards"])
+        assert groupe["owned"] <= groupe["listed"]
+
+
+def test_les_tranches_de_popularite_couvrent_la_collection_classee():
+    """
+    Une carte sans rang EDHREC n'est pas une carte mal classée : c'est une
+    absence de mesure. La ranger avec les moins jouées inventerait une
+    information, donc elle n'est comptée nulle part.
+    """
+    from services.must_have import rank_distribution
+    from db.core import get_conn
+
+    with get_conn() as conn:
+        with conn.cursor() as cur:
+            cur.execute("""
+                SELECT COUNT(*) AS n FROM collection col
+                JOIN cards_cheapest c ON c.oracle_id = col.oracle_id
+                WHERE c.edhrec_rank IS NOT NULL
+            """)
+            classées = cur.fetchone()["n"]
+
+    assert sum(b["cards"] for b in rank_distribution()) == classées

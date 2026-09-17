@@ -347,6 +347,7 @@ app/
 ├── decks/[id]/suggestions/page.tsx  # ajouts/retraits sous plafond de prix
 ├── collection/page.tsx              # saisie en masse + à l'unité, quantités
 ├── wishlist/page.tsx                # liste de recherche + « c'est acheté »
+├── page.tsx                         # vue d'ensemble : couverture de la collection
 ├── must-have/page.tsx               # cartes les plus jouées par type, sous plafond
 ├── deck-ideas/page.tsx              # quel deck monter avec ce qu'on possède
 ├── deck-plans/page.tsx              # comparaison par commandant + 4 decks à monter + PDF
@@ -392,6 +393,12 @@ revalider.** Deux jeux distincts, jamais mélangés :
   **toute forme qui les emploie doit porter la lettre de couleur**, jamais la
   teinte seule.
 - `--series-a` / `--series-b` : les deux decks comparés. Réservées à ça.
+- `--chart-seq` : teinte **séquentielle à une seule série**, pour une magnitude
+  comparée entre catégories (la vue d'ensemble). `#a56300` en clair, `#c38323`
+  en sombre — validés séparément contre `--card` dans chaque mode, et non
+  éclaircis l'un depuis l'autre. L'accent `--primary` avait été essayé
+  d'abord : il **échoue au plancher de chroma**, c'est-à-dire qu'en graphique
+  il lit gris. Ne pas y revenir sans revalider.
 
 Règle de fond pour les comparaisons : les axes ont des unités différentes (un
 tour, un taux, un compte). Chaque ligne est normalisée **sur sa propre paire**
@@ -848,6 +855,42 @@ liste, renvoie explicitement vers les suggestions du deck.
 Refuser relance le calcul côté client, là où `/must-have` se contente d'une mise
 à jour locale : écarter une carte doit laisser une autre prendre sa place, et
 seul le moteur peut la désigner.
+
+
+## Vue d'ensemble (`/`)
+
+La page d'arrivée après connexion — la page de connexion elle-même ne peut rien
+afficher, elle n'a pas encore de jeton. Elle répond à « où en est ma collection
+face à ce qui se joue », par type et par popularité.
+
+**Sans plafond de prix, et c'est tout le point.** `/must-have` répond « qu'est-ce
+que je peux acheter », cette page répond « qu'est-ce que je couvre ». Appliquer
+un plafond ici gonflerait mécaniquement la couverture : les cartes chères qu'on
+ne possède pas sortiraient du **dénominateur**, donc le pourcentage monterait
+sans qu'on ait rien acquis. Les deux lectures partagent la même requête
+(`must_have(max_price=None)`), pour qu'elles ne puissent pas diverger.
+
+Trois précautions d'affichage :
+
+- **Le dénominateur est la taille réelle de chaque classement**, pas la cible :
+  les Batailles sont moins de cinquante en tout, et « 0 / 50 » laisserait croire
+  à un manque inexistant.
+- **Les cartes manquantes sont estompées, pas masquées.** Un classement dont on
+  retire ce qu'on n'a pas ne dit plus rien de ce qu'il reste à couvrir.
+- **Une carte à plusieurs types n'est comptée qu'une fois** dans la liste
+  parcourue, alors qu'elle figure bien dans chacun de ses classements.
+
+Les **tranches de popularité** sont de largeur croissante parce que le rang
+EDHREC est un classement et non une note : l'écart entre le 1er et le 100e n'a
+rien à voir avec celui entre le 4000e et le 4100e. Les cartes **sans rang** ne
+sont comptées dans aucune tranche — une absence de mesure n'est pas un mauvais
+score, et les ranger avec les moins jouées inventerait une information.
+
+Les deux graphiques n'ont **qu'une série** chacun : ce sont des magnitudes, pas
+des identités. D'où `--chart-seq` et non une palette catégorielle, qui aurait
+donné huit couleurs sans information et enterré la seule chose qui compte,
+l'ordre des longueurs. Filtre et pagination sont côté navigateur : la réponse
+tient en une requête, la repayer à chaque clic de page serait du gaspillage.
 
 
 ## Reste à faire

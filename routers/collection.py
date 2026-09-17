@@ -6,6 +6,7 @@ from pydantic import BaseModel, Field
 import db.cards as cards_db
 import db.collection as collection_db
 
+from services import must_have as must_have_service
 from services.collection_import import import_collection, is_basic_land
 
 router = APIRouter(prefix="/collection", tags=["collection"])
@@ -31,6 +32,24 @@ def list_collection(search: str | None = Query(default=None)):
     # affichage de tableau. Les images sont rapatriées quand une carte entre
     # dans un deck ou une liste d'achat.
     return {"cards": collection_db.list_all(search), "stats": collection_db.stats()}
+
+
+@router.get("/coverage")
+def collection_coverage(format: str = Query(default="commander", pattern="^(commander|duel)$")):
+    """
+    Récapitulatif : quelle part du classement réel la collection couvre, par
+    type, plus la répartition par tranche de popularité.
+
+    **Sans plafond de prix, contrairement à `/must-have`.** La question posée
+    ici n'est pas « qu'est-ce que je peux acheter » mais « où en est ma
+    collection face à ce qui se joue ». Appliquer un plafond gonflerait la
+    couverture en faisant disparaître du dénominateur les cartes chères qu'on
+    ne possède pas.
+
+    Pas de `ensure_images` : la page couvre huit types, donc près de quatre
+    cents visuels, et le front retombe sur Scryfall comme pour `/must-have`.
+    """
+    return must_have_service.coverage(format=format)
 
 
 @router.post("/import")
