@@ -350,6 +350,7 @@ app/
 ├── page.tsx                         # vue d'ensemble : couverture de la collection
 ├── must-have/page.tsx               # cartes les plus jouées par type, sous plafond
 ├── deck-ideas/page.tsx              # quel deck monter avec ce qu'on possède
+├── deck-ideas/[id]/page.tsx         # decklist proposée + remplacement par la collection
 ├── deck-plans/page.tsx              # comparaison par commandant + 4 decks à monter + PDF
 ├── competitive/page.tsx             # deck compétitif bâti sur la collection
 ├── balance/page.tsx                 # équilibrage de 4 decks + liste d'achats PDF
@@ -866,6 +867,36 @@ liste, renvoie explicitement vers les suggestions du deck.
 Refuser relance le calcul côté client, là où `/must-have` se contente d'une mise
 à jour locale : écarter une carte doit laisser une autre prendre sa place, et
 seul le moteur peut la désigner.
+
+
+### Essayer un archétype sans acheter (`/deck-ideas/[id]`)
+
+Ouvrir une idée de deck donne la liste que les joueurs d'EDHREC montent
+réellement avec ce commandant, et **un bouton « remplacer » sur chaque carte à
+acheter** : le créneau est repris par une carte déjà possédée. Le deck y perd
+en puissance et c'est assumé — un deck moins fort qu'on peut jouer ce soir vaut
+mieux qu'un deck parfait qu'on n'a pas.
+
+Quatre règles portent le remplacement :
+
+- **Le remplaçant est du même rôle** quand il en existe un (`categories`).
+  Échanger un removal contre un rocher de mana dépannerait le budget en
+  déséquilibrant le deck.
+- **Un exemplaire n'occupe qu'un créneau.** C'est la même règle physique que
+  pour l'allocation entre decks : une carte déjà employée ne ressort pas
+  ailleurs dans la liste.
+- **Le vivier ignore le prix et écarte les terrains.** Ces cartes sont acquises,
+  leur prix ne concerne personne ; et le noyau visé étant non-terrain,
+  remplacer un rocher de mana par une forêt ne remplirait pas le créneau, il en
+  créerait un autre.
+- **Rien n'est écrit en base.** La page est un brouillon : le remplacement vit
+  dans le navigateur, il est instantané et réversible. Le vivier complet est
+  renvoyé en une fois plutôt qu'interrogé carte par carte — quelques centaines
+  de lignes tiennent dans une réponse, un aller-retour par clic rendrait le
+  geste poussif.
+
+`ensure_images` ne porte que sur le noyau : le vivier peut compter des
+centaines de lignes dont on n'affichera qu'une poignée.
 
 
 ## Vue d'ensemble (`/`)

@@ -12,6 +12,15 @@ IS_COMMANDER_CLAUSE = """
 
 # Colonnes d'une carte recommandée. `owned_quantity` est ce qui rend la suite
 # calculable : c'est lui qui dit si la carte coûte quelque chose.
+# Mêmes colonnes que les recommandations, moins celles qui viennent d'EDHREC :
+# un remplaçant pris dans la collection n'a ni taux d'inclusion ni section.
+RECOMMENDATION_COLUMNS_OWNED = """
+    c.oracle_id, c.scryfall_id, c.name, fr.printed_name AS name_fr,
+    c.type_line, c.mana_cost, c.cmc, c.color_identity, c.price_eur,
+    c.image_uri, c.image_downloaded, c.categories, c.game_changer,
+    c.edhrec_rank, col.quantity AS owned_quantity
+"""
+
 RECOMMENDATION_COLUMNS = """
     c.oracle_id, c.scryfall_id, c.name, fr.printed_name AS name_fr,
     c.type_line, c.mana_cost, c.cmc, c.color_identity, c.price_eur,
@@ -107,3 +116,39 @@ def has_data() -> bool:
         with conn.cursor() as cur:
             cur.execute("SELECT EXISTS (SELECT 1 FROM commander_recommendations)")
             return cur.fetchone()["exists"]
+
+
+def owned_pool(identity: list[str], exclude_oracle_ids: list[str],
+               format: str = "commander") -> list[dict]:
+    """
+    Les cartes **possédées** utilisables avec ce commandant, hors celles déjà
+    retenues. Sert à remplacer un achat conseillé par quelque chose qu'on a
+    déjà, pour essayer l'archétype avant de dépenser.
+
+    Aucun filtre de prix : ces cartes sont acquises, leur prix ne concerne
+    personne. Les terrains sont écartés parce que le noyau visé est non-terrain
+    — remplacer un rocher de mana par une forêt ne remplirait pas le créneau.
+
+    Classées par rang EDHREC croissant : à défaut de savoir ce qui va bien avec
+    ce commandant précis, le plus joué du format est le moins mauvais repli.
+    Les cartes sans rang passent en dernier — une absence de mesure n'est pas
+    une bonne note.
+    """
+    legality = "legal_duel" if format == "duel" else "legal_commander"
+    with get_conn() as conn:
+        with conn.cursor() as cur:
+            cur.execute(
+                f"""
+                SELECT {RECOMMENDATION_COLUMNS_OWNED}
+                FROM collection col
+                JOIN cards_cheapest c ON c.oracle_id = col.oracle_id
+                LEFT JOIN card_names_fr fr ON fr.oracle_id = c.oracle_id
+                WHERE c.{legality}
+                  AND c.color_identity <@ %(identity)s::text[]
+                  AND NOT (c.oracle_id = ANY(%(exclude)s::uuid[]))
+                  AND NOT (c.categories @> ARRAY['land'])
+                ORDER BY c.edhrec_rank NULLS LAST, c.name
+                """,
+                {"identity": sorted(identity), "exclude": exclude_oracle_ids},
+            )
+            return cur.fetchall()
