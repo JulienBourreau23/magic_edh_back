@@ -13,7 +13,7 @@ from config import CARD_IMAGES_DIR, CORS_ORIGINS, DB_POOL_MAX
 from db.core import close_pool
 from auth import require_auth
 from routers import (admin, auth, balance, cards, collection, competitive, deck_ideas,
-                     deck_plans, decks, matchup, must_have, wishlist)
+                     deck_plans, decks, matchup, must_have, performance, wishlist)
 
 
 @asynccontextmanager
@@ -61,4 +61,5 @@ app.include_router(deck_plans.router, dependencies=protected)
 app.include_router(competitive.router, dependencies=protected)
 app.include_router(wishlist.router, dependencies=protected)
 app.include_router(must_have.router, dependencies=protected)
+app.include_router(performance.router, dependencies=protected)
 app.include_router(admin.router, dependencies=protected)

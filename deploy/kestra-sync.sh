@@ -42,9 +42,16 @@ case "${SSH_ORIGINAL_COMMAND:-}" in
     # streaming). À rejouer après chaque sortie de set, comme Scryfall.
     exec venv/bin/python scripts/sync_french_names.py
     ;;
+  rank-commanders)
+    # Classe les commandants possédés par victoire mesurée : des milliers de
+    # parties simulées, plusieurs minutes. Ce n'est pas une synchronisation —
+    # rien n'est récupéré à l'extérieur — mais c'est le même besoin : un calcul
+    # trop long pour une requête HTTP, à rejouer quand la collection bouge.
+    exec venv/bin/python scripts/rank_commanders.py
+    ;;
   *)
     echo "Commande refusée : '${SSH_ORIGINAL_COMMAND:-<vide>}'." >&2
-    echo "Valeurs acceptées : scryfall, french-names, edhrec." >&2
+    echo "Valeurs acceptées : scryfall, french-names, edhrec, rank-commanders." >&2
     exit 2
     ;;
 esac

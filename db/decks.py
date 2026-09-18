@@ -173,6 +173,31 @@ def get_deck_cards_for_simulation(deck_id: int) -> list[dict]:
             return cur.fetchall()
 
 
+def simulation_cards_by_id(scryfall_ids: list[str]) -> dict[str, dict]:
+    """
+    {scryfall_id: carte prête pour le duel simulé}, en une requête.
+
+    Le duel a besoin du texte oracle, des corps de créature et des mots-clés —
+    colonnes que les écrans de construction ne renvoient jamais. Un deck
+    fabriqué ailleurs (plan, deck compétitif) arrive donc ici sous forme
+    d'identifiants, et repart jouable.
+    """
+    if not scryfall_ids:
+        return {}
+    with get_conn() as conn:
+        with conn.cursor() as cur:
+            cur.execute(
+                f"""
+                SELECT {SIMULATION_CARD_COLUMNS}
+                FROM cards c
+                {FRENCH_NAME_JOIN}
+                WHERE c.scryfall_id = ANY(%s::uuid[])
+                """,
+                (list({str(value) for value in scryfall_ids}),),
+            )
+            return {str(row["scryfall_id"]): row for row in cur.fetchall()}
+
+
 def update_deck(deck_id: int, name: str | None = None, format: str | None = None,
                 commander_scryfall_id: str | None = None) -> bool:
     """Met à jour les champs fournis. Renvoie False si le deck n'existe pas."""

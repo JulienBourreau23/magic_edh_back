@@ -510,6 +510,7 @@ app/
 ├── competitive/page.tsx             # deck compétitif bâti sur la collection
 ├── balance/page.tsx                 # équilibrage de 4 decks + liste d'achats PDF
 ├── matchup/page.tsx                 # comparaison de deux decks
+├── performance/page.tsx             # qui gagne, et avec quel archétype
 └── login/page.tsx                   # seule page utilisable sans jeton
 components/
     CardTile, CardBinder, CardSearch, CollectionFilters, CompetitiveDeck,
@@ -1203,6 +1204,61 @@ donné huit couleurs sans information et enterré la seule chose qui compte,
 l'ordre des longueurs. Filtre et pagination sont côté navigateur : la réponse
 tient en une requête, la repayer à chaque clic de page serait du gaspillage.
 
+
+## Qui gagne, et avec quel archétype (`/performance`)
+
+**Aucune source ne publie de taux de victoire en Commander casual.** EDHREC
+compte des decks, pas des parties ; les bases de tournoi ne couvrent que le
+cEDH. Prendre le bracket ou la popularité pour une performance inventerait la
+mesure — exactement ce que le projet refuse ailleurs pour le stax. La seule
+victoire mesurable ici est donc celle que le projet simule déjà
+(`services/duel.py`), et la page hérite du **biais documenté** de ce modèle.
+
+**La méthode est un gantelet, pas un tournoi toutes rondes.** Chaque commandant
+possédé monte son meilleur deck avec la collection, puis affronte le même
+panel : les decks enregistrés. Deux raisons, et la seconde décide :
+
+- un tournoi toutes rondes sur 131 commandants, c'est 8 515 affrontements, une
+  heure et demie de calcul, à refaire après chaque achat ;
+- « qui bat ce qu'on joue déjà » est une question plus utile, pour une soirée
+  entre amis, que « qui bat la moyenne des commandants possédés ».
+
+Quatre règles portent la mesure, toutes venues d'un résultat faux constaté :
+
+- **Un score ne se compare qu'à panel égal.** Le panel est donc écrit dans
+  chaque ligne, avec la date, et affiché en tête de page. Ajouter un deck
+  enregistré change tous les taux.
+- **Un deck de moins de 60 cartes n'est pas un adversaire**
+  (`MIN_PANEL_DECK_CARDS`). Un brouillon de neuf cartes traînait en base : il
+  perdait contre tout le monde et gonflait tous les taux de la même façon, ce
+  qui ne classe plus rien.
+- **Pas de miroir** : un commandant n'affronte pas son propre deck. Seuls ceux
+  qui en ont déjà un en joueraient, et leur score cesserait d'être comparable
+  aux autres (mesuré : 65 % → 75 % sur l'Edgar une fois le miroir écarté).
+- **Les parties non conclues au bout de 25 tours comptent au dénominateur.** Ne
+  pas savoir finir est un résultat, pas une absence de résultat.
+
+Le taux agrège **toutes** les parties du panel plutôt que la moyenne des taux
+par adversaire : sinon un adversaire écarté pèserait autant qu'un adversaire
+joué.
+
+**Les archétypes ne sont mesurés que pour les vingt premiers**
+(`THEMES_FOR_TOP`) : 562 archétypes coûteraient un quart d'heure et personne ne
+lit le 87e. Chacun est monté par `competitive.build`, qui répond déjà à « le
+plus proche des decks réels de cet archétype, avec ce que j'ai ». **Tous les
+archétypes d'un commandant restent affichés**, pas seulement le meilleur :
+savoir que l'infect gagne ne dit rien de ce que valent les autres, et c'est
+justement la question qu'on se pose devant un commandant.
+
+**Le calcul vit en ligne de commande** (`scripts/rank_commanders.py`, plusieurs
+minutes) et écrit `commander_performance`, table reconstructible. L'endpoint
+`GET /performance` ne fait que la lire : le déclencher en HTTP se ferait couper
+à 100 s par Cloudflare, comme la synchro EDHREC avant lui. Le `case`
+`rank-commanders` de `deploy/kestra-sync.sh` permet de le planifier.
+
+**Un noyau incomplet explique un mauvais score sans rien dire du commandant** :
+c'est la collection qui manque de cartes dans son identité de couleur. La page
+affiche donc `core_size` à côté du taux.
 
 ## Sortir une decklist de l'écran
 
