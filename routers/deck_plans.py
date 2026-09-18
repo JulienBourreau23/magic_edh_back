@@ -15,7 +15,10 @@ from services import deck_plans as deck_plans_service
 from services.suggestions import DEFAULT_MAX_PRICE_EUR
 
 router = APIRouter(prefix="/deck-plans", tags=["deck-plans"])
-logger = logging.getLogger(__name__)
+# Le logger d'uvicorn, et non celui du module : uvicorn configure ses propres
+# gestionnaires, et une ligne émise ailleurs remonte à la racine, qui est en
+# WARNING par défaut — elle n'apparaîtrait donc jamais dans journalctl.
+logger = logging.getLogger("uvicorn.error")
 
 
 class CreateDecksRequest(BaseModel):
