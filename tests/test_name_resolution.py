@@ -104,3 +104,20 @@ def test_face_avant_en_francais():
     # par `sync_french_names` : les deux moitiés se cherchent comme en anglais.
     assert _resolu("Feu // Glace") == "Fire // Ice"
     assert _resolu("Feu") == "Fire // Ice"
+
+
+def test_le_commandant_porte_de_quoi_chiffrer_un_combo():
+    """
+    Contrat entre `owned_commanders` et `combos._describe` : un combo dont le
+    commandant est une moitié a besoin de son coût converti. Sans `cmc`, la
+    construction des quatre decks levait un KeyError — donc un 500 sans en-tête
+    CORS, que le navigateur n'annonce que par « NetworkError » — et /deck-ideas
+    sous-estimait en silence le mana total du combo.
+    """
+    import db.commanders as commanders_db
+
+    commandants = commanders_db.owned_commanders()
+    if not commandants:
+        pytest.skip("aucun commandant dans la collection de cette base")
+    for champ in ("cmc", "name", "name_fr", "oracle_id"):
+        assert champ in commandants[0]

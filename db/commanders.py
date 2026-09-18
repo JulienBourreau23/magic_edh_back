@@ -74,6 +74,13 @@ def owned_commanders(format: str = "commander") -> list[dict]:
                        -- Le commandant compte dans le bracket s'il est
                        -- lui-même Game Changer, et son coût dans la manabase.
                        c.mana_cost, c.categories, c.game_changer,
+                       -- `cmc` sert à chiffrer un combo dont le commandant est
+                       -- une moitié (`combos._describe`). Son absence faisait
+                       -- planter « Monter 4 decks » en KeyError — donc une
+                       -- réponse 500 sans en-tête CORS, que le navigateur ne
+                       -- sait annoncer que par « NetworkError » — et amputait en
+                       -- silence le mana total affiché par /deck-ideas.
+                       c.cmc,
                        b.counts AS bracket_counts,
                        (SELECT d.id FROM decks d
                          JOIN cards dc ON dc.scryfall_id = d.commander_scryfall_id
