@@ -78,14 +78,58 @@ def _summarize(card: dict, owned: bool, role: str | None = None) -> dict:
     }
 
 
-def _sort_key(entry: tuple[bool, dict]) -> tuple:
+def _sort_key(entry: tuple[bool, dict], owned_only: bool = False) -> tuple:
     """
     Ordre de pioche dans le pool : ce qu'on possède d'abord (gratuit), puis les
     cartes les plus jouées, et à popularité comparable la moins chère.
+
+    Sans achat, le prix ne départage plus rien — tout est déjà payé. C'est
+    alors le rang EDHREC qui tranche : à défaut de savoir ce qui va bien avec ce
+    commandant précis, le plus joué du format est le moins mauvais repli, et les
+    cartes sans rang passent en dernier (une absence de mesure n'est pas une
+    bonne note).
     """
     free, card = entry
+    band = -int((card["inclusion_rate"] or 0) * INCLUSION_BAND)
+    if owned_only:
+        return (0 if free else 1, band, card.get("edhrec_rank") or 10**9, card["name"])
     price = float(card["price_eur"]) if card["price_eur"] is not None else 0.0
-    return (0 if free else 1, -int((card["inclusion_rate"] or 0) * INCLUSION_BAND), price, card["name"])
+    return (0 if free else 1, band, price, card["name"])
+
+
+def with_owned_cards(pools: dict[str, list[dict]], commanders: list[dict],
+                     owned_cards: list[dict]) -> dict[str, list[dict]]:
+    """
+    Élargit chaque vivier à **toute la collection jouable** derrière ce
+    commandant (identité de couleur respectée), en plus des cartes qu'EDHREC y
+    voit jouées.
+
+    Sans ça, le mode « sans achat » ne pourrait piocher que dans l'intersection
+    entre la collection et les listes EDHREC — quelques dizaines de cartes — et
+    proposerait des decks de vingt cartes alors que la collection en contient
+    des centaines de jouables. Les recommandations gardent leur `inclusion_rate`
+    et passent donc devant ; le reste de la collection vient ensuite, classé par
+    popularité.
+
+    Réservé à ce mode, volontairement : avec achats, la page répond « le deck
+    qu'EDHREC monte derrière ce commandant », et y verser toute la collection
+    changerait la question.
+    """
+    elargis = {}
+    for commander in commanders:
+        oracle_id = str(commander["oracle_id"])
+        identity = set(commander["color_identity"] or [])
+        pool = pools.get(oracle_id, [])
+        known = {str(card["oracle_id"]) for card in pool}
+        known.add(oracle_id)
+        extra = [
+            {**card, "inclusion_rate": None}
+            for card in owned_cards
+            if str(card["oracle_id"]) not in known
+            and set(card["color_identity"] or []) <= identity
+        ]
+        elargis[oracle_id] = [*pool, *extra]
+    return elargis
 
 
 def _main_role(card: dict) -> str | None:
@@ -98,7 +142,7 @@ def _main_role(card: dict) -> str | None:
 
 def build_deck(commander: dict, pool: list[dict], available: dict[str, int],
                max_price: float, target_bracket: int | None,
-               find_combos=None) -> dict:
+               find_combos=None, owned_only: bool = False) -> dict:
     """
     Construit un deck pour ce commandant en consommant `available` (les
     exemplaires encore libres dans la collection, modifié sur place).
@@ -106,6 +150,12 @@ def build_deck(commander: dict, pool: list[dict], available: dict[str, int],
     Deux passes, dans cet ordre : les quotas de rôle d'abord — c'est ce qui rend
     le deck équilibré et ça ne peut pas être rattrapé après coup — puis le
     remplissage jusqu'à 63 non-terrains.
+
+    `owned_only` répond à « que puis-je monter ce soir sans rien acheter » :
+    aucune carte absente de la collection n'entre dans la liste. Le noyau peut
+    alors faire moins de 63 cartes — c'est un fait sur la collection, pas un
+    échec, et `core_size` le dit. Un plafond de prix à zéro n'aurait pas suffi :
+    quelques cartes valent 0,00 € sans être pour autant dans la boîte.
     """
     allowance = _game_changer_allowance(target_bracket) if target_bracket else CORE_SIZE
 
@@ -114,11 +164,13 @@ def build_deck(commander: dict, pool: list[dict], available: dict[str, int],
         if categories.is_land(card):
             continue
         free = available.get(str(card["oracle_id"]), 0) > 0
+        if not free and owned_only:
+            continue
         # Sans prix connu, impossible de garantir le plafond : on ne l'achète pas.
         if not free and (card["price_eur"] is None or float(card["price_eur"]) > max_price):
             continue
         candidates.append((free, card))
-    candidates.sort(key=_sort_key)
+    candidates.sort(key=lambda entry: _sort_key(entry, owned_only))
 
     chosen: list[dict] = []
     taken: set[str] = set()
@@ -255,6 +307,29 @@ def _land_plan(commander: dict, pool: list[dict], available: dict[str, int],
     }
 
 
+def deck_rows(plan: dict, basic_land_ids: dict[str, str]) -> list[tuple[str, int, bool]]:
+    """
+    Le plan tel qu'il s'écrit en base : `[(scryfall_id, quantité, commandant)]`.
+
+    Le deck enregistré est **exactement celui affiché** — noyau, terrains
+    non-basiques possédés, terrains de base — sans quoi les conseils qui
+    suivront ne parleraient pas du même deck.
+
+    Rien n'est ajouté à la collection au passage : ces cartes y sont déjà, c'est
+    la condition même du mode sans achat. Les ajouter compterait chaque
+    exemplaire deux fois et ferait disparaître des achats pourtant nécessaires.
+    """
+    rows = [(plan["commander"]["scryfall_id"], 1, True)]
+    rows += [(card["scryfall_id"], 1, False) for card in plan["core"]]
+    rows += [(land["scryfall_id"], 1, False) for land in plan["lands"]["owned_nonbasic"]]
+    rows += [
+        (basic_land_ids[name], count, False)
+        for name, count in plan["lands"]["basics"].items()
+        if name in basic_land_ids
+    ]
+    return rows
+
+
 def _shopping_list(plans: list[dict]) -> list[dict]:
     """
     Liste d'achats consolidée, au format attendu par l'export PDF existant.
@@ -293,7 +368,7 @@ def _motif(item: dict) -> str:
 
 def _build_group(commanders: list[dict], pools: dict[str, list[dict]], owned: dict[str, int],
                  max_price: float, natural: dict[str, int], target_bracket: int | None,
-                 find_combos=None) -> dict:
+                 find_combos=None, owned_only: bool = False) -> dict:
     """
     Monte les quatre decks d'un groupe sur une collection partagée.
 
@@ -315,7 +390,7 @@ def _build_group(commanders: list[dict], pools: dict[str, list[dict]], owned: di
 
     plans = [
         build_deck(commander, pools[str(commander["oracle_id"])], available, max_price,
-                   target, find_combos)
+                   target, find_combos, owned_only)
         for commander in ordered
     ]
     shopping_list = _shopping_list(plans)
@@ -331,9 +406,19 @@ def _build_group(commanders: list[dict], pools: dict[str, list[dict]], owned: di
 
 
 def _group_score(group: dict) -> tuple:
-    """Équilibre d'abord (l'écart aux repères de rôle), prix ensuite."""
+    """
+    Équilibre d'abord (l'écart aux repères de rôle), puis le **remplissage**,
+    puis le prix.
+
+    Le remplissage ne comptait pas tant que les decks faisaient toujours 63
+    cartes. Sans achat, ce n'est plus vrai : deux commandants qui se disputent
+    la même moitié de collection donnent deux decks courts, et un groupe de
+    quatre decks complets vaut mieux qu'un groupe mieux étalé en bracket mais
+    troué.
+    """
     return (
         group["role_gap"],
+        -sum(plan["core_size"] for plan in group["plans"]),
         group["brackets"][-1] - group["brackets"][0],
         group["total_cost_eur"],
         -sum(plan["avg_inclusion"] for plan in group["plans"]),
@@ -342,7 +427,8 @@ def _group_score(group: dict) -> tuple:
 
 def plan_decks(commanders: list[dict], pools: dict[str, list[dict]], owned: dict[str, int],
                max_price: float, target_bracket: int | None = None,
-               chosen_oracle_ids: list[str] | None = None, find_combos=None) -> dict:
+               chosen_oracle_ids: list[str] | None = None, find_combos=None,
+               owned_only: bool = False) -> dict:
     """
     Renvoie la comparaison de tous les commandants et le meilleur groupe de
     quatre (ou celui imposé par `chosen_oracle_ids`).
@@ -360,7 +446,8 @@ def plan_decks(commanders: list[dict], pools: dict[str, list[dict]], owned: dict
     natural = {}
     for commander in usable:
         oracle_id = str(commander["oracle_id"])
-        plan = build_deck(commander, pools[oracle_id], dict(owned), max_price, None, find_combos)
+        plan = build_deck(commander, pools[oracle_id], dict(owned), max_price, None,
+                          find_combos, owned_only)
         solo[oracle_id] = plan
         natural[oracle_id] = plan["bracket"]["min"]
 
@@ -374,8 +461,9 @@ def plan_decks(commanders: list[dict], pools: dict[str, list[dict]], owned: dict
                     "commanders": [_comparison_row(plan) for plan in comparison],
                     "selection": None}
         group = _build_group([by_id[oid] for oid in chosen_oracle_ids], pools, owned,
-                             max_price, natural, target_bracket, find_combos)
-        return _result(comparison, group, max_price, len(usable), forced=True)
+                             max_price, natural, target_bracket, find_combos, owned_only)
+        return _result(comparison, group, max_price, len(usable), forced=True,
+                       owned_only=owned_only)
 
     # Au-delà du garde-fou, on ne garde que les moins chers à monter seuls : un
     # commandant qui coûte déjà cher tout seul ne devient pas bon marché en
@@ -388,11 +476,13 @@ def plan_decks(commanders: list[dict], pools: dict[str, list[dict]], owned: dict
 
     size = min(DECKS_TO_BUILD, len(pool_of_commanders))
     best = min(
-        (_build_group(list(group), pools, owned, max_price, natural, target_bracket, find_combos)
+        (_build_group(list(group), pools, owned, max_price, natural, target_bracket,
+                      find_combos, owned_only)
          for group in combinations(pool_of_commanders, size)),
         key=_group_score,
     )
-    return _result(comparison, best, max_price, len(usable), forced=False)
+    return _result(comparison, best, max_price, len(usable), forced=False,
+                   owned_only=owned_only)
 
 
 def _comparison_row(plan: dict) -> dict:
@@ -405,12 +495,13 @@ def _comparison_row(plan: dict) -> dict:
 
 
 def _result(comparison: list[dict], group: dict, max_price: float,
-            commanders_compared: int, forced: bool) -> dict:
+            commanders_compared: int, forced: bool, owned_only: bool = False) -> dict:
     return {
         "core_size": CORE_SIZE,
         "land_slots": LAND_SLOTS,
         "decks_to_build": DECKS_TO_BUILD,
         "max_price_eur": max_price,
+        "owned_only": owned_only,
         "commanders_compared": commanders_compared,
         "selection_forced": forced,
         "commanders": [_comparison_row(plan) for plan in comparison],

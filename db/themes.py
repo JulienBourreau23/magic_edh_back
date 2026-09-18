@@ -135,11 +135,13 @@ def build_pool(commander_oracle_id: str, theme_slug: str, format: str,
                        COALESCE(rates.theme_rate, 0)::float AS theme_rate,
                        COALESCE(commander_rates.commander_rate, 0)::float AS commander_rate,
                        COALESCE(col.quantity, 0) AS owned_quantity,
+                       COALESCE(w.quantity, 0) AS wanted_quantity,
                        fr.printed_name AS name_fr
                 FROM rates
                 JOIN cards_cheapest c ON c.oracle_id = rates.oracle_id
                 LEFT JOIN commander_rates ON commander_rates.oracle_id = rates.oracle_id
                 LEFT JOIN collection col ON col.oracle_id = rates.oracle_id
+                LEFT JOIN wishlist w ON w.oracle_id = rates.oracle_id
                 LEFT JOIN card_names_fr fr ON fr.oracle_id = c.oracle_id
                 WHERE c.{legality}
                   AND c.color_identity <@ %(identity)s::text[]

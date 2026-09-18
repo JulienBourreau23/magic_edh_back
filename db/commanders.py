@@ -190,6 +190,40 @@ def owned_pool(identity: list[str], exclude_oracle_ids: list[str],
             return cur.fetchall()
 
 
+def owned_cards(format: str = "commander") -> list[dict]:
+    """
+    **Toute** la collection, en une requête, avec de quoi la trier et la
+    filtrer ensuite en mémoire.
+
+    Sert au mode « sans achat » de `/deck-plans` : les recommandations EDHREC ne
+    connaissent que ce que les autres joueurs montent derrière un commandant,
+    donc s'y limiter reviendrait à ignorer la moitié de la collection et à
+    proposer des decks de vingt cartes. `owned_pool` répond à la même question
+    mais commandant par commandant — cent trente et une requêtes là où une
+    suffit, l'identité de couleur se vérifiant très bien côté Python.
+
+    Les terrains **non-basiques** sont gardés, contrairement à `owned_pool` :
+    ici ils garnissent la manabase, qui est gratuite. Les basiques, jamais —
+    ils ne sont pas dans la collection et se comptent à part.
+    """
+    legality = LEGALITY_COLUMNS[format]
+    with get_conn() as conn:
+        with conn.cursor() as cur:
+            cur.execute(
+                f"""
+                SELECT {RECOMMENDATION_COLUMNS_OWNED}
+                FROM collection col
+                JOIN cards_cheapest c ON c.oracle_id = col.oracle_id
+                LEFT JOIN card_names_fr fr ON fr.oracle_id = c.oracle_id
+                LEFT JOIN wishlist w ON w.oracle_id = c.oracle_id
+                WHERE c.{legality}
+                  AND c.type_line NOT LIKE 'Basic Land%%'
+                ORDER BY c.edhrec_rank NULLS LAST, c.name
+                """
+            )
+            return cur.fetchall()
+
+
 def synergies_for_deck(commander_oracle_id: str, oracle_ids: list[str],
                        theme_slug: str | None = None) -> list[dict]:
     """

@@ -68,6 +68,42 @@ def list_all() -> list[dict]:
             return cur.fetchall()
 
 
+def wanted_by_oracle_id(oracle_ids: list[str]) -> dict[str, int]:
+    """
+    {oracle_id: exemplaires déjà cherchés}, pour les seuls identifiants demandés.
+
+    Sert aux listes d'achats, qui sont assemblées en Python à partir de
+    plusieurs sources : elles n'ont pas de requête unique où accrocher une
+    jointure, et les quantités de la liste de recherche **s'additionnent** — un
+    second clic demanderait un second exemplaire sans rien dire.
+    """
+    if not oracle_ids:
+        return {}
+    with get_conn() as conn:
+        with conn.cursor() as cur:
+            cur.execute(
+                "SELECT oracle_id, quantity FROM wishlist WHERE oracle_id = ANY(%s::uuid[])",
+                (list({str(oracle_id) for oracle_id in oracle_ids}),),
+            )
+            return {str(row["oracle_id"]): row["quantity"] for row in cur.fetchall()}
+
+
+def annotate_wanted(items: list[dict]) -> list[dict]:
+    """
+    Marque des lignes d'achat (`ShoppingItem`) des exemplaires **déjà** dans la
+    liste de recherche, en une seule requête.
+
+    Appelé par les routers et non par les services qui calculent ces listes :
+    ces calculs sont testés sans base, et `/deck-plans` évalue des dizaines de
+    groupes dont un seul est retenu — une requête par groupe serait payée pour
+    rien.
+    """
+    wanted = wanted_by_oracle_id([item["oracle_id"] for item in items])
+    for item in items:
+        item["wanted_quantity"] = wanted.get(str(item["oracle_id"]), 0)
+    return items
+
+
 def acquire(oracle_id: str, quantity: int | None = None) -> dict | None:
     """
     L'achat est fait : la carte passe de la liste de recherche à la collection.

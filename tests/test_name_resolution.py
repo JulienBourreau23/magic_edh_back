@@ -73,3 +73,34 @@ def test_nom_inconnu_reste_absent():
 
 def test_casse_ignoree():
     assert _resolu("anneau solaire") == "Sol Ring"
+
+
+def test_face_avant_d_une_carte_a_deux_noms():
+    # Une decklist écrit « Bloodline Keeper », jamais
+    # « Bloodline Keeper // Lord of Lineage » — et magic-ville n'imprime que le
+    # recto sur la vignette. Sans ce passage, ces cartes restaient non résolues.
+    assert _resolu("Fire") == "Fire // Ice"
+    assert _resolu("Fire // Ice") == "Fire // Ice"
+    assert _resolu("Bloodline Keeper") == "Bloodline Keeper // Lord of Lineage"
+
+
+def test_une_vraie_carte_gagne_sur_une_face_avant():
+    # Smelt existe seule **et** comme face avant de « Smelt // Herd // Saw ».
+    # Le passage par face avant vient en dernier : il ne peut donc pas voler un
+    # nom qui désigne une carte entière.
+    assert _resolu("Smelt") == "Smelt"
+    assert _resolu("Armed") == "Armed"
+
+
+def test_la_face_arriere_ne_resout_pas():
+    # Une face arrière n'est pas une carte : la résoudre ferait passer une
+    # planche de proxys magic-ville à 101 cartes sans que rien ne le signale.
+    assert _resolu("Lord of Lineage") is None
+    assert _resolu("Stomp") is None
+
+
+def test_face_avant_en_francais():
+    # Le nom français d'une carte à deux faces est recollé « recto // verso »
+    # par `sync_french_names` : les deux moitiés se cherchent comme en anglais.
+    assert _resolu("Feu // Glace") == "Fire // Ice"
+    assert _resolu("Feu") == "Fire // Ice"

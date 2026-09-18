@@ -16,9 +16,14 @@ def resolve_names(names: list[str]) -> dict[str, dict]:
     """
     Résout une liste de noms en allers-retours SQL successifs, du plus strict
     au plus tolérant : noms anglais exacts, puis noms français exacts, puis les
-    deux en comparaison **insensible aux accents et aux ligatures**. Renvoie
+    deux en comparaison **insensible aux accents et aux ligatures**, enfin la
+    **face avant** d'une carte à deux noms dans les deux langues. Renvoie
     {nom de la requête en minuscules: carte}. Les noms non trouvés sont
     simplement absents — à l'appelant de tenter le flou.
+
+    Chaque passage ne travaille que sur le reliquat du précédent : l'ordre est
+    donc une priorité, pas une simple suite. C'est ce qui rend le passage par
+    face avant sans danger (voir son commentaire).
 
     L'anglais est prioritaire : c'est le nom canonique, et un nom français peut
     théoriquement coïncider avec le nom anglais d'une autre carte.
@@ -94,6 +99,58 @@ def resolve_names(names: list[str]) -> dict[str, dict]:
                 FROM unnest(%s::text[]) AS q(name)
                 JOIN card_names_fr fr
                   ON normalize_card_name(fr.printed_name) = normalize_card_name(q.name)
+                JOIN cards_cheapest c ON c.oracle_id = fr.oracle_id
+                ORDER BY lower(q.name), c.name
+                """,
+                (remaining,),
+            )
+            for row in cur.fetchall():
+                resolved.setdefault(row["match_key"], row)
+
+            remaining = [name for name in names if name.lower() not in resolved]
+            if not remaining:
+                return resolved
+
+            # Dernier passage : la **face avant** d'une carte à deux noms, dans
+            # les deux langues. Une decklist écrit « Bloodline Keeper », pas
+            # « Bloodline Keeper // Lord of Lineage », et magic-ville n'imprime
+            # que le recto sur la vignette.
+            #
+            # Deux garde-fous :
+            #   - il vient en **dernier**, donc un nom qui désigne une vraie
+            #     carte gagne toujours. C'est ce qui sauve Smelt, Armed et Bind,
+            #     qui existent à la fois seuls et en face avant d'une partagée ;
+            #   - il ne regarde **que** la face avant. La face arrière (« Lord of
+            #     Lineage ») et la moitié aventure ne sont pas des cartes : les
+            #     résoudre ferait passer une planche de proxys magic-ville à 101
+            #     cartes en silence, alors qu'aujourd'hui elles sont signalées.
+            cur.execute(
+                """
+                SELECT DISTINCT ON (lower(q.name)) lower(q.name) AS match_key, c.*
+                FROM unnest(%s::text[]) AS q(name)
+                JOIN cards_cheapest c
+                  ON c.name LIKE '%% // %%'
+                 AND normalize_card_name(split_part(c.name, ' // ', 1))
+                     = normalize_card_name(q.name)
+                ORDER BY lower(q.name), c.name
+                """,
+                (remaining,),
+            )
+            for row in cur.fetchall():
+                resolved.setdefault(row["match_key"], row)
+
+            remaining = [name for name in names if name.lower() not in resolved]
+            if not remaining:
+                return resolved
+
+            cur.execute(
+                """
+                SELECT DISTINCT ON (lower(q.name)) lower(q.name) AS match_key, c.*
+                FROM unnest(%s::text[]) AS q(name)
+                JOIN card_names_fr fr
+                  ON fr.printed_name LIKE '%% // %%'
+                 AND normalize_card_name(split_part(fr.printed_name, ' // ', 1))
+                     = normalize_card_name(q.name)
                 JOIN cards_cheapest c ON c.oracle_id = fr.oracle_id
                 ORDER BY lower(q.name), c.name
                 """,
@@ -210,10 +267,15 @@ def find_candidates(color_identity: set[str], category: str, exclude_oracle_ids:
                        c.edhrec_rank, c.categories, c.game_changer,
                        fr.printed_name AS name_fr,
                        COALESCE(col.quantity, 0) AS owned_quantity,
+                       -- Déjà dans la liste de recherche : le bouton doit le
+                       -- dire au lieu d'en demander un second exemplaire, les
+                       -- quantités s'y additionnant.
+                       COALESCE(w.quantity, 0) AS wanted_quantity,
                        (col.quantity IS NOT NULL
                         AND NOT (c.oracle_id = ANY(%(exhausted)s::uuid[]))) AS free_to_use
                 FROM cards_cheapest c
                 LEFT JOIN collection col ON col.oracle_id = c.oracle_id
+                LEFT JOIN wishlist w ON w.oracle_id = c.oracle_id
                 LEFT JOIN card_names_fr fr ON fr.oracle_id = c.oracle_id
                 WHERE c.{legality_column}
                   AND c.color_identity <@ %(identity)s::text[]

@@ -31,6 +31,34 @@ ON CONFLICT (oracle_id) DO UPDATE SET printed_name = EXCLUDED.printed_name
 """
 
 
+def printed_name_for(card: dict) -> str | None:
+    """
+    Le nom français d'une carte, **faces comprises**.
+
+    Une carte à deux faces (recto-verso, partagée, aventure, flip) n'a pas de
+    `printed_name` au premier niveau : Scryfall le range dans chaque face. À ne
+    lire que le premier niveau, ces cartes n'avaient jamais de nom français —
+    mesuré : 1 carte sur 878, contre 90 % pour les cartes simples. Elles
+    s'affichaient donc en anglais partout, et une decklist française les
+    laissait non résolues.
+
+    Les faces sont recollées avec ` // `, **exactement la convention du champ
+    `name` anglais de Scryfall** : c'est ce qui permet aux deux langues d'être
+    comparées de la même façon, alias contre nom.
+
+    Une seule face traduite ne donne rien : un nom à moitié français ne
+    correspondrait ni à ce qu'on voit sur la carte, ni à ce qu'un joueur écrit.
+    """
+    if card.get("printed_name"):
+        return card["printed_name"]
+
+    faces = card.get("card_faces") or []
+    names = [face.get("printed_name") for face in faces]
+    if len(names) >= 2 and all(names):
+        return " // ".join(names)
+    return None
+
+
 def main() -> None:
     with httpx.Client(timeout=120, headers=SCRYFALL_HEADERS) as client:
         index = client.get(f"{SCRYFALL_API_BASE}/bulk-data").json()
@@ -59,7 +87,7 @@ def main() -> None:
 
                             card = json.loads(line)
                             oracle_id = card.get("oracle_id")
-                            printed = card.get("printed_name")
+                            printed = printed_name_for(card)
                             if not oracle_id or not printed or oracle_id in seen:
                                 continue
 

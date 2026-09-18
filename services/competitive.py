@@ -256,6 +256,7 @@ def _summarize(card: dict) -> dict:
     summary = {field: card.get(field) for field in CARD_FIELDS}
     summary["oracle_id"] = str(card["oracle_id"])
     summary["owned"] = card["owned_quantity"] > 0
+    summary["wanted_quantity"] = card.get("wanted_quantity") or 0
     summary["theme_rate"] = round(card["theme_rate"], 3)
     summary["commander_rate"] = round(card["commander_rate"], 3)
     return summary

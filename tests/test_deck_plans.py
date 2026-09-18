@@ -165,3 +165,69 @@ def test_sans_donnees_edhrec_on_le_dit():
 
     assert "EDHREC" in result["error"]
     assert result["selection"] is None
+
+
+def test_sans_achat_ne_propose_que_ce_qu_on_possede():
+    # « Que puis-je monter ce soir sans rien acheter » : une carte absente de la
+    # collection ne doit pas entrer dans la liste, même à 0,50 € — sinon la page
+    # répond à une autre question que celle posée.
+    possedees = {f"n-{RAMP}-{i}" for i in range(5)} | {f"n-neutre-{i}" for i in range(10)}
+    pool = full_pool("n", owned_names=possedees)
+    available = {f"oracle-{name}": 1 for name in possedees}
+
+    plan = deck_plans.build_deck(commander(), pool, available, 50, None, owned_only=True)
+
+    assert plan["to_buy"] == []
+    assert plan["cost_eur"] == 0
+    assert plan["core_size"] == len(possedees)
+    assert all(item["owned"] for item in plan["core"])
+
+
+def test_sans_achat_un_noyau_incomplet_est_dit_tel_quel():
+    # Le noyau peut faire moins de 63 cartes : c'est un fait sur la collection,
+    # pas un échec à masquer. Le compter comme complet ferait croire à un deck
+    # jouable en l'état.
+    possedees = {f"m-{DRAW}-{i}" for i in range(3)}
+    pool = full_pool("m", owned_names=possedees)
+
+    plan = deck_plans.build_deck(commander(), pool, {f"oracle-{n}": 1 for n in possedees},
+                                 50, None, owned_only=True)
+
+    assert plan["core_size"] == 3
+    assert plan["role_gap"] > 0
+
+
+def test_le_vivier_sans_achat_s_elargit_a_la_collection():
+    # Les recommandations EDHREC ne connaissent que ce que les autres jouent
+    # derrière ce commandant : s'y limiter laisserait dormir la moitié de la
+    # collection. L'identité de couleur reste un filtre dur.
+    chef = commander("Mono", identity=["B"])
+    recommandee = card("deja-conseillee")
+    hors_couleur = {**card("rouge"), "color_identity": ["R"]}
+    utilisable = card("possedee-noire")
+
+    pools = deck_plans.with_owned_cards(
+        {"oracle-Mono": [recommandee]}, [chef],
+        [recommandee, hors_couleur, utilisable],
+    )
+
+    noms = [c["name"] for c in pools["oracle-Mono"]]
+    assert noms == ["deja-conseillee", "possedee-noire"]
+    # La carte venue de la collection n'a pas de taux d'inclusion : elle passe
+    # donc après les conseillées, jamais devant.
+    assert pools["oracle-Mono"][1]["inclusion_rate"] is None
+
+
+def test_le_deck_enregistre_est_celui_affiche():
+    # Ce qui part en base doit être exactement la liste montrée : commandant,
+    # noyau, terrains possédés et basiques avec leur quantité. Un écart ici
+    # ferait porter tous les conseils suivants sur un autre deck.
+    plan = deck_plans.build_deck(commander(), full_pool("p"), {}, 50, None)
+    rows = deck_plans.deck_rows(plan, {"Marais": "scryfall-Marais"})
+
+    assert rows[0] == ("scryfall-Chef", 1, True)
+    assert sum(1 for _id, _qty, chef in rows if chef) == 1
+    assert len(rows) == 1 + plan["core_size"] + len(plan["lands"]["owned_nonbasic"]) + \
+        len(plan["lands"]["basics"])
+    basiques = [row for row in rows if row[0] == "scryfall-Marais"]
+    assert basiques and basiques[0][1] == plan["lands"]["basics"]["Marais"]

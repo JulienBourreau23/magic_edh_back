@@ -2,6 +2,7 @@ from fastapi import APIRouter, HTTPException, Query
 
 import db.collection as collection_db
 import db.decks as decks_db
+import db.wishlist as wishlist_db
 import services.card_images as card_images
 from services import balance as balance_service
 from services import combos
@@ -43,5 +44,8 @@ def balance_decks(
         entries, collection_db.quantities(), max_price, target_bracket,
         combos_by_deck={deck["id"]: combos.find_in_deck(cards) for deck, cards in entries},
     )
+    # Les deux pages qui produisent des achats renvoient la même forme
+    # `ShoppingItem` : elles portent donc la même marque « déjà cherchée ».
+    wishlist_db.annotate_wanted(result.get("shopping_list", []))
     card_images.ensure_images(result.get("shopping_list", []))
     return result

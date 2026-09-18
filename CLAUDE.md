@@ -231,6 +231,37 @@ disponibles sans limite, ils ne se cherchent pas. La saisie en masse partage le
 parseur des decklists (`decklist_parser`) — même format d'entrée, seule la
 destination change.
 
+### Le bouton « + recherche », et pourquoi il se tait parfois
+
+Tous les écrans qui **conseillent** une carte permettent de l'envoyer dans la
+liste de recherche : suggestions, équilibrage, cartes à avoir, idée de deck,
+deck compétitif, et les deux listes d'achats. Un seul composant
+(`components/WishlistButton.tsx`), pour une raison qui n'est pas cosmétique :
+**les quantités de la liste de recherche s'additionnent**. Un bouton toujours
+actif transforme donc un second clic — ou un simple retour sur la page — en
+second exemplaire demandé, sans rien dire. Une carte déjà cherchée affiche
+« déjà cherchée » et ne fait rien.
+
+Le compte vient du serveur (`wanted_quantity`), exposé aux trois endroits qui
+produisent des conseils :
+
+- `db/cards.find_candidates` — **le point d'entrée unique** de `/suggestions`
+  et `/balance`, comme pour les refus : une jointure, deux écrans ;
+- `db/themes.build_pool` — le vivier du deck compétitif ;
+- `db/wishlist.annotate_wanted` — les listes d'achats déjà assemblées
+  (`/balance`, `/deck-plans`), qui n'ont pas de requête unique où poser une
+  jointure.
+
+`annotate_wanted` est appelé **par les routers**, jamais par les services qui
+calculent ces listes. Deux raisons, et elles se paieraient toutes les deux :
+ces calculs sont testés sans base, et `/deck-plans` évalue des dizaines de
+groupes dont un seul est retenu — une requête par groupe serait payée pour
+rien.
+
+Après un ajout réussi, le bouton bascule **localement** : recharger une page de
+conseils pour un booléen coûterait des dizaines de requêtes SQL, et sur
+`/must-have` cela relancerait seize requêtes à chaque clic.
+
 ### Monter quatre decks d'un coup (`/deck-plans`)
 
 `services/deck_plans.py` répond à « fais-moi quatre decks équilibrés dont les
@@ -261,6 +292,73 @@ Le tableau de comparaison, lui, montre chaque commandant **monté seul**,
 collection entière disponible : c'est le seul point de vue où ils sont
 comparables entre eux. Ne pas additionner ses colonnes de coût pour prévoir un
 groupe, elles ne s'additionnent pas.
+
+#### Le mode « sans achat »
+
+`owned_only` répond à une autre question : « qu'est-ce que je peux monter ce
+soir, sans rien acheter ». Aucune carte absente de la collection n'entre dans
+les decks, et la liste d'achats disparaît de l'écran plutôt que d'afficher zéro.
+
+Trois conséquences qui ne se devinent pas :
+
+- **Le vivier s'élargit à toute la collection** (`with_owned_cards`), identité
+  de couleur respectée. Les recommandations EDHREC ne connaissent que ce que
+  les autres jouent derrière ce commandant : s'y limiter aurait proposé des
+  decks de vingt cartes alors que la collection en contient des centaines de
+  jouables. Les cartes conseillées gardent leur `inclusion_rate` et passent
+  devant ; le reste de la collection suit, classé par rang EDHREC. Cet
+  élargissement est **réservé à ce mode** — avec achats, la page répond « le
+  deck qu'EDHREC monte derrière ce commandant », et y verser toute la
+  collection changerait la question.
+- **Le prix ne départage plus rien**, tout est déjà payé : `_sort_key` bascule
+  sur le rang EDHREC, et le plafond de prix disparaît de l'écran.
+- **Un noyau peut rester incomplet.** C'est un fait sur la collection, pas un
+  échec : l'interface écrit « 27/63, 36 créneaux vides » au lieu de faire
+  croire à un deck complet. C'est aussi pourquoi `_group_score` compte
+  désormais le **remplissage** juste après l'écart aux rôles : quatre decks
+  complets valent mieux qu'un groupe mieux étalé en bracket mais troué.
+
+Un plafond de prix à zéro n'aurait pas suffi à exprimer « sans achat » :
+quelques cartes valent 0,00 € sans être pour autant dans la boîte.
+
+#### Enregistrer les decks, puis les améliorer dans le temps
+
+`POST /deck-plans/create` transforme les decks proposés en vrais decks. C'est le
+chaînon qui manquait : tout ce qui améliore un deck ensuite — `/balance`, les
+suggestions, les refus de conseil — a besoin d'un deck qui existe. La page
+renvoie donc vers `/balance?decks=…`, déjà pointé sur les quatre decks créés :
+c'est **là** que se décident les achats, au fil du temps et sous plafond de
+prix.
+
+Trois précautions :
+
+- **Le groupe est recalculé côté serveur** à partir des seuls `oracle_id` des
+  commandants. La decklist n'est pas envoyée par le navigateur : la collection
+  a pu bouger entre l'affichage et le clic, et une liste reçue du client serait
+  une seconde vérité à vérifier.
+- **Un commandant qui a déjà un deck est ignoré, pas dupliqué**, et la réponse
+  le dit (`skipped`).
+- **Rien n'est ajouté à la collection.** Ces cartes y sont déjà — c'est la
+  condition même du mode sans achat — et les compter deux fois ferait
+  disparaître des achats pourtant nécessaires.
+
+#### Le piège de performance : une requête par deck construit
+
+Cette page construit **des milliers de decks** : 131 commandants montés seuls,
+puis quatre decks par groupe évalué (C(12,4) = 495), soit 2 111 constructions.
+Chacune cherchait ses combos par une requête SQL — 2 111 allers-retours vers une
+base qui vit sur une autre machine en production.
+
+`combos.matcher_for(vivier)` charge le catalogue **une fois** et croise ensuite
+en mémoire, à résultat et ordre identiques. Mesuré à l'échelle de la
+collection : 5,4 s → 2,0 s sur base locale, et surtout 2 111 allers-retours
+réseau en moins. C'est exactement le genre de somme qui fait dépasser le
+**plafond de 100 s de Cloudflare**, lequel coupe la réponse sans rien laisser :
+le navigateur n'affiche alors qu'un « NetworkError », sans code HTTP ni message.
+
+La durée est tracée dans `journalctl -u mtg-back` (`deck-plans : N commandants
+en X s`) : c'est la seule façon de voir venir ce plafond, puisque la réponse
+coupée n'en dit rien.
 
 ### Diagnostic de manabase : une cible par couleur, pas un plancher commun
 
@@ -361,13 +459,16 @@ app/
 └── login/page.tsx                   # seule page utilisable sans jeton
 components/
     CardTile, CardBinder, CardSearch, CollectionFilters, CompetitiveDeck,
-    DeckToolbar, ImportIssuesPanel, ManabaseAdvice, TopNav, ThemeProvider/Toggle
+    DeckToolbar, DeckExport, ImportIssuesPanel, ManabaseAdvice, TopNav,
+    ThemeProvider/Toggle, WishlistButton
     graphiques : ManaCurveChart, ColorDonut, AxisRings, InitiativeSplit, DuelOutcome
 lib/api.ts                  # tous les appels au back + types
 lib/auth.ts                 # jeton en localStorage (d'où les composants client)
 lib/collection-filters.ts   # filtres de la page collection
 lib/mtg-labels.ts           # libellés français des mots-clés Scryfall
 lib/shopping-pdf.ts         # export PDF de la liste d'achats
+lib/deck-pdf.ts             # export PDF d'une fiche : liste, visuels, tournoi
+lib/decklist.ts             # découpage d'une decklist en sections de types
 ```
 
 > Next.js 16 a des ruptures avec les versions antérieures (`params` est une
@@ -591,9 +692,49 @@ pour rien : seul le nom change, l'`oracle_id` est commun.
 
 La résolution essaie l'anglais d'abord (canonique, et un nom français pourrait
 coïncider avec le nom anglais d'une autre carte), puis le français, puis le flou
-sur les deux langues à la fois. **Couverture : ~88 %** — les vieux sets, Secret
-Lairs et certains produits Commander n'ont jamais été traduits, l'absence
-d'alias est normale et il faut alors le nom anglais.
+sur les deux langues à la fois, enfin la **face avant** d'une carte à deux noms
+dans les deux langues. **Couverture : ~90 %** — les vieux sets, Secret Lairs et
+certains produits Commander n'ont jamais été traduits, l'absence d'alias est
+normale et il faut alors le nom anglais.
+
+### Les cartes à deux noms (partagées, recto-verso, aventures)
+
+Scryfall ne met `printed_name` au premier niveau que pour les cartes à **une**
+face : une partagée, une recto-verso, une aventure ou une flip le range dans
+`card_faces`. Le sync ne lisait que le premier niveau, si bien qu'**une carte à
+deux noms sur 878 avait un nom français**, contre 90 % des cartes simples.
+C'est l'erreur silencieuse type : rien ne remonte, ces cartes ont juste l'air de
+ne pas être traduites. Conséquences concrètes : « Feu // Glace » s'affichait en
+anglais partout, fiches et PDF compris, et une decklist française la laissait
+non résolue.
+
+`printed_name_for()` recolle donc les faces avec ` // `, **exactement la
+convention du champ `name` anglais** : c'est ce qui permet de comparer alias et
+nom de la même façon dans les deux langues. Une seule face traduite ne donne
+rien — un nom à moitié français ne correspondrait ni à la carte imprimée ni à
+ce qu'un joueur écrit, et l'absence d'alias retombe proprement sur l'anglais.
+La colonne ne se remplit qu'à la resynchronisation
+(`python scripts/sync_french_names.py`), comme toute correction de ce script.
+Mesuré après coup : 697 cartes à deux noms sur 878 ont un nom français, le
+reste n'a jamais été traduit.
+
+**La résolution accepte la face avant seule** : une decklist écrit « Bloodline
+Keeper », jamais « Bloodline Keeper // Lord of Lineage », et magic-ville
+n'imprime que le recto sur la vignette. Deux garde-fous, tous deux vérifiés par
+un test :
+
+- ce passage vient **en dernier**, donc un nom qui désigne une vraie carte
+  gagne toujours — Smelt, Armed et Bind existent à la fois seuls et en face
+  avant d'une carte partagée ;
+- il ne regarde **que la face avant**. Résoudre « Lord of Lineage » ou une
+  moitié aventure ferait passer une planche de proxys magic-ville à 101 cartes
+  en silence, alors qu'aujourd'hui ces vignettes sont signalées — c'est le
+  comportement décrit au chapitre magic-ville, et il ne change pas.
+
+À l'impression, un nom à deux faces déborde souvent de sa colonne.
+`fitCardName` (`lib/deck-pdf.ts`) **retire le verso avant de tronquer** :
+« Jace, prodige de Vryn » identifie la carte, « Jace, prodige de Vryn // Jace,
+télép… » n'apprend rien de plus.
 
 Côté affichage, `displayName(card)` (front) et `deck_analysis.display_name()`
 (back) appliquent la même règle : français si disponible, anglais sinon. **Le
@@ -1008,6 +1149,86 @@ donné huit couleurs sans information et enterré la seule chose qui compte,
 l'ordre des longueurs. Filtre et pagination sont côté navigateur : la réponse
 tient en une requête, la repayer à chaque clic de page serait du gaspillage.
 
+
+## Sortir une decklist de l'écran
+
+### Les terrains se lisent en liste, comme le reste des cartes
+
+Les écrans qui **construisent** un deck (`/competitive`, `/deck-plans`) les
+énuméraient en une phrase — « Bassin réfléchissant, Fontaine sacrée, 11 Ile,
+8 Montagne » — alors que les sorts, eux, étaient en liste. Une manabase se
+relit carte par carte comme le reste, et les basiques portent une quantité
+qu'une énumération noie. Ils sont donc rendus comme les autres sections :
+quantité à gauche, nom à droite. Les terrains de base n'ont pas de visuel en
+mode images (ils n'ont pas d'impression choisie, seulement un nom et un
+compte) : ils restent en liste sous la planche des non-basiques.
+
+Le découpage par type vit dans `lib/decklist.ts`, partagé par le deck
+compétitif et l'export PDF — sans quoi la même carte finirait dans deux
+sections différentes selon l'écran. Deux règles de classement s'y trouvent,
+toutes deux issues de cartes réelles : **`Land` est testé en premier** (une
+Cité de Darksteel est un « Artifact Land », et on la cherche dans ses
+terrains), et **`Creature` avant `Artifact`** (un Solemn Simulacrum se joue
+comme une créature).
+
+### Trois PDF pour trois usages (`lib/deck-pdf.ts`)
+
+Générés côté navigateur comme la liste d'achats, par un seul composant
+(`components/DeckExport.tsx`) branché sur les **trois écrans qui montrent une
+decklist** : la fiche de deck, le deck compétitif et l'idée de deck. Ce ne sont
+pas trois habillages du même document : chacun répond à une question que les
+deux autres ne posent pas.
+
+- **Liste par type** — le deck rangé par sections, deux colonnes, une page
+  pour cent cartes. Ce qu'on garde avec la boîte.
+- **Visuels** — cinq cartes par ligne, vingt-cinq par page. À 33 mm de large
+  l'illustration reste reconnaissable, ce qui est tout son rôle ici, le nom
+  étant en légende. Quatre colonnes donnaient sept pages pour un deck.
+  **Une carte en plusieurs exemplaires n'est dessinée qu'une fois**, sa
+  quantité en légende : imprimer douze Forêts coûterait douze images sans rien
+  apprendre.
+- **Feuille de tournoi** — **tout** est listé, quantité et nom seulement, par
+  ordre alphabétique et en trois colonnes équilibrées, le commandant marqué
+  d'un astérisque. Rien d'autre : c'est ce qu'un arbitre vérifie, le prix et le
+  type l'encombreraient.
+
+**Toutes les listes ne valent pas une feuille de tournoi**, d'où le paramètre
+`modes` : `/deck-ideas/[id]` n'en propose pas. Cette liste est un brouillon de
+63 non-terrains sans manabase, et l'exporter comme une decklist officielle
+serait un piège — le PDF porte d'ailleurs une `note` qui dit ce qui manque. Ce
+qui part au PDF y est l'**état courant de l'écran**, remplacements compris.
+
+Trois conséquences du fait que ces écrans ne stockent rien
+(`generatedDeckCards`) :
+
+- **Chaque carte vaut un exemplaire**, sauf les terrains de base qui arrivent
+  en compte (`{"Forêt": 8}`) et non en cartes.
+- **Un basique n'a ni identifiant Scryfall ni visuel** : aucune édition n'a été
+  choisie pour lui. Il est listé comme les autres et laisse, en mode images, un
+  cadre à son nom — ce qui est exact, pas un défaut d'affichage.
+- **Le commandant a sa propre section** en tête de la liste par type. C'est
+  ainsi qu'une decklist s'écrit, et c'est la seule carte dont le rôle ne se lit
+  pas dans son type — accessoirement, `/deck-ideas` ne renvoie pas le
+  `type_line` de son commandant, qui serait tombé dans « Autre ».
+
+Le `type_line` des cartes conseillées, lui, **était déjà lu en base et jeté**
+par `services/deck_ideas._summarize` : sans lui toute la liste tombait dans
+« Autre ». Il est désormais exposé (une ligne, aucune requête de plus).
+
+Deux points d'exploitation :
+
+- **Les visuels passent par `fetch`, donc par CORS.** Scryfall répond `*`, et
+  notre `/card-images` hérite des en-têtes de `CORSMiddleware` — mais une
+  origine absente de `CORS_ORIGINS` ferait échouer silencieusement chaque
+  image. L'export ne casse pas pour autant : une image manquante laisse un
+  cadre au nom de la carte, et le manque se voit. Six téléchargements en
+  parallèle, comme le rapatriement côté back, et la progression est affichée
+  sur le bouton — une centaine d'images prend quelques secondes et pèse
+  ~8 Mo.
+- **Les noms sont ceux de l'écran** (`displayName`) : français quand la carte
+  a été traduite, anglais pour les ~12 % qui ne l'ont jamais été. Un arbitre
+  français lit les deux ; forcer l'anglais rendrait la feuille illisible pour
+  le joueur qui la remplit.
 
 ## Reste à faire
 

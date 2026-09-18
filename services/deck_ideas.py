@@ -28,6 +28,9 @@ def _summarize(card: dict) -> dict:
         "price_eur": card["price_eur"],
         "image_uri": card["image_uri"],
         "image_downloaded": card["image_downloaded"],
+        # Le type sert à ranger la decklist par section — à l'écran comme dans
+        # l'export PDF. Sans lui, toutes les cartes tombaient dans « Autre ».
+        "type_line": card.get("type_line"),
         "inclusion_rate": float(card["inclusion_rate"]) if card.get("inclusion_rate") else None,
         "game_changer": card["game_changer"],
         # `categories` sert à remplacer une carte par une autre du même rôle :
