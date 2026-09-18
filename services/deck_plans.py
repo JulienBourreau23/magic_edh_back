@@ -97,6 +97,22 @@ def _sort_key(entry: tuple[bool, dict], owned_only: bool = False) -> tuple:
     return (0 if free else 1, band, price, card["name"])
 
 
+def free_copies(owned: dict[str, int], committed: dict[str, int]) -> dict[str, int]:
+    """
+    Les exemplaires réellement disponibles : ce qu'on possède moins ce que les
+    decks déjà enregistrés immobilisent.
+
+    La soustraction est **bornée à zéro** : la collection peut ignorer les
+    cartes d'un deck importé sans la case « déjà monté », et un compte négatif
+    n'aurait aucun sens — il rendrait la carte impossible à employer au lieu de
+    la rendre simplement rare.
+    """
+    return {
+        oracle_id: max(0, quantity - committed.get(oracle_id, 0))
+        for oracle_id, quantity in owned.items()
+    }
+
+
 def with_owned_cards(pools: dict[str, list[dict]], commanders: list[dict],
                      owned_cards: list[dict]) -> dict[str, list[dict]]:
     """

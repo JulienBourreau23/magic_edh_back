@@ -231,3 +231,21 @@ def test_le_deck_enregistre_est_celui_affiche():
         len(plan["lands"]["basics"])
     basiques = [row for row in rows if row[0] == "scryfall-Marais"]
     assert basiques and basiques[0][1] == plan["lands"]["basics"]["Marais"]
+
+
+def test_un_exemplaire_range_dans_un_deck_monte_n_est_plus_disponible():
+    # La règle « un exemplaire dans un seul deck » s'arrêtait à la porte des
+    # decks déjà enregistrés : le plan reproposait des cartes physiquement
+    # rangées dans une autre boîte. Mesuré sur la collection réelle : 135 cartes
+    # du plan étaient dans ce cas.
+    libres = deck_plans.free_copies({"a": 2, "b": 1}, {"a": 1, "b": 1})
+
+    assert libres == {"a": 1, "b": 0}
+
+
+def test_la_soustraction_ne_descend_pas_sous_zero():
+    # Un deck importé sans la case « déjà monté » n'a pas alimenté la
+    # collection : ses cartes peuvent donc être « engagées » sans être
+    # possédées. Un compte négatif rendrait la carte inemployable au lieu de la
+    # rendre rare.
+    assert deck_plans.free_copies({"a": 1}, {"a": 4}) == {"a": 0}

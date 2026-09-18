@@ -108,6 +108,38 @@ def get_deck(deck_id: int) -> dict | None:
             return cur.fetchone()
 
 
+def committed_quantities(exclude_deck_ids: list[int] | None = None) -> dict[str, int]:
+    """
+    {oracle_id: exemplaires immobilisés dans les decks enregistrés}.
+
+    Un exemplaire rangé dans un deck monté n'est pas disponible pour en monter
+    un autre : c'est la même règle physique que celle appliquée *entre* les
+    quatre decks d'un plan, mais elle s'arrêtait à la porte des decks existants.
+    Le plan pouvait donc proposer un Sol Ring déjà dans une boîte.
+
+    Les terrains de base sont exclus, comme partout : ils ne s'épuisent pas.
+
+    **Limite assumée** : rien en base ne dit qu'un deck est *physiquement*
+    monté. Un deck seulement envisagé immobilise donc ses cartes lui aussi —
+    d'où l'interrupteur côté page, plutôt qu'une réservation imposée en
+    silence.
+    """
+    with get_conn() as conn:
+        with conn.cursor() as cur:
+            cur.execute(
+                """
+                SELECT c.oracle_id, SUM(dc.quantity)::int AS quantity
+                FROM deck_cards dc
+                JOIN cards c ON c.scryfall_id = dc.scryfall_id
+                WHERE c.type_line NOT LIKE 'Basic Land%%'
+                  AND NOT (dc.deck_id = ANY(%(exclude)s::int[]))
+                GROUP BY c.oracle_id
+                """,
+                {"exclude": exclude_deck_ids or []},
+            )
+            return {str(row["oracle_id"]): row["quantity"] for row in cur.fetchall()}
+
+
 def get_deck_cards(deck_id: int) -> list[dict]:
     with get_conn() as conn:
         with conn.cursor() as cur:

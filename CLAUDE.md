@@ -293,6 +293,34 @@ collection entière disponible : c'est le seul point de vue où ils sont
 comparables entre eux. Ne pas additionner ses colonnes de coût pour prévoir un
 groupe, elles ne s'additionnent pas.
 
+#### Un exemplaire est aussi pris quand il est dans un deck déjà monté
+
+La règle « un exemplaire ne peut être que dans un deck à la fois » était
+appliquée **entre les quatre decks du plan**, mais s'arrêtait à la porte des
+decks déjà enregistrés. Or la collection est justement alimentée par les decks
+cochés « déjà monté » : le plan reproposait donc des cartes physiquement rangées
+dans une autre boîte. Mesuré sur la collection réelle : **135 cartes du plan**
+étaient dans ce cas, dont un Arcane Signet demandé quatre fois alors que les
+quatre exemplaires sont déjà en deck.
+
+`decks_db.committed_quantities()` compte ce que les decks enregistrés
+immobilisent, `deck_plans.free_copies()` le soustrait (borné à zéro), et
+`reserve_existing_decks` — **vrai par défaut** — commande le tout, aussi bien à
+l'affichage qu'à la création, sans quoi le deck créé différerait de l'aperçu.
+
+Deux points à garder en tête :
+
+- **Rien en base ne dit qu'un deck est *physiquement* monté** : la case « ce
+  deck est déjà monté » de l'import alimente la collection mais n'est pas
+  conservée. Tous les decks enregistrés sont donc supposés montés, et
+  l'interrupteur « je peux les démonter » existe pour le cas contraire. Une
+  colonne `assembled` sur `decks` serait la vraie réponse si le besoin se
+  précise.
+- **La réservation n'a rien coûté ici** : sur la collection réelle, 480
+  exemplaires immobilisés sur 2 111, et le plan sort toujours quatre decks
+  complets (63/63, tous les repères de rôle tenus). Seul le quatrième
+  commandant change.
+
 #### Le mode « sans achat »
 
 `owned_only` répond à une autre question : « qu'est-ce que je peux monter ce

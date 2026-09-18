@@ -21,11 +21,27 @@ router = APIRouter(prefix="/deck-plans", tags=["deck-plans"])
 logger = logging.getLogger("uvicorn.error")
 
 
+def _available(reserve_existing_decks: bool) -> dict[str, int]:
+    """
+    Ce qui est réellement disponible pour monter de nouveaux decks.
+
+    La règle « un exemplaire dans un seul deck à la fois » était appliquée entre
+    les quatre decks du plan, mais pas face aux decks déjà enregistrés : sur une
+    collection alimentée par des decks montés, le plan reproposait donc des
+    cartes physiquement rangées ailleurs.
+    """
+    owned = collection_db.quantities()
+    if not reserve_existing_decks:
+        return owned
+    return deck_plans_service.free_copies(owned, decks_db.committed_quantities())
+
+
 class CreateDecksRequest(BaseModel):
     commanders: list[str] = Field(min_length=1, max_length=deck_plans_service.DECKS_TO_BUILD)
     max_price: float = Field(default=DEFAULT_MAX_PRICE_EUR, gt=0)
     target_bracket: int | None = Field(default=None, ge=1, le=5)
     owned_only: bool = False
+    reserve_existing_decks: bool = True
 
 
 @router.get("")
@@ -41,6 +57,11 @@ def build_deck_plans(
         default=False,
         description="ne retenir que des cartes déjà possédées : quatre decks montables "
                     "ce soir, sans aucun achat",
+    ),
+    reserve_existing_decks: bool = Query(
+        default=True,
+        description="les decks déjà enregistrés gardent leurs cartes : un exemplaire rangé "
+                    "dans une boîte ne sert pas à monter un autre deck",
     ),
 ):
     """
@@ -70,9 +91,10 @@ def build_deck_plans(
 
     started = time.monotonic()
     result = deck_plans_service.plan_decks(
-        owned, pools, collection_db.quantities(), max_price, target_bracket, chosen,
+        owned, pools, _available(reserve_existing_decks), max_price, target_bracket, chosen,
         find_combos=combos.matcher_for(universe), owned_only=owned_only,
     )
+    result["reserve_existing_decks"] = reserve_existing_decks
     # Tracé dans journalctl : c'est la seule façon de voir venir un dépassement
     # du plafond de Cloudflare, qui coupe sans rien laisser dans la réponse.
     logger.info("deck-plans : %d commandants en %.1f s", len(owned), time.monotonic() - started)
@@ -109,8 +131,8 @@ def create_decks(request: CreateDecksRequest):
     universe.update(str(commander["oracle_id"]) for commander in owned)
 
     result = deck_plans_service.plan_decks(
-        owned, pools, collection_db.quantities(), request.max_price, request.target_bracket,
-        request.commanders, find_combos=combos.matcher_for(universe),
+        owned, pools, _available(request.reserve_existing_decks), request.max_price,
+        request.target_bracket, request.commanders, find_combos=combos.matcher_for(universe),
         owned_only=request.owned_only,
     )
     if result.get("error"):
