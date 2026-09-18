@@ -249,3 +249,43 @@ def test_la_soustraction_ne_descend_pas_sous_zero():
     # possédées. Un compte négatif rendrait la carte inemployable au lieu de la
     # rendre rare.
     assert deck_plans.free_copies({"a": 1}, {"a": 4}) == {"a": 0}
+
+
+def test_les_candidats_suivants_sont_juges_sur_ce_qui_reste():
+    # Sélection pas à pas : après un premier deck, un commandant qui partageait
+    # ses cartes s'effondre, et c'est exactement l'information qu'on cherche.
+    # Les juger sur une collection intacte reviendrait à proposer quatre fois le
+    # même deck.
+    possedees = {f"s-{role}-{i}" for role in ROLES for i in range(8)}
+    pool = full_pool("s", owned_names=possedees)
+    pools = {"oracle-A": pool, "oracle-B": pool}
+    commandants = [commander("A"), commander("B")]
+    stock = {f"oracle-{nom}": 1 for nom in possedees}
+
+    seul = deck_plans.plan_decks(commandants, pools, stock, 50, owned_only=True)
+    apres = deck_plans.plan_decks(commandants, pools, stock, 50,
+                                  chosen_oracle_ids=["oracle-A"], owned_only=True)
+
+    assert seul["after_selection"] is False
+    assert apres["after_selection"] is True
+    assert apres["remaining_slots"] == deck_plans.DECKS_TO_BUILD - 1
+    # B est seul en lice, et il ne lui reste rien : A a tout pris.
+    reste = next(row for row in apres["commanders"] if row["commander"]["name"] == "B")
+    assert reste["core_size"] == 0
+
+
+def test_la_selection_a_la_main_garde_l_ordre_des_clics():
+    # Le commandant choisi en premier sert en premier : l'ordre automatique
+    # (« le plus contraint d'abord ») rebattrait le contenu des decks déjà
+    # affichés à chaque nouveau clic.
+    rare = card("Rare", categories=[RAMP], owned=1, inclusion=0.99)
+    pools = {"oracle-A": [rare, *full_pool("t")], "oracle-B": [rare, *full_pool("u")]}
+    commandants = [commander("A"), commander("B")]
+
+    result = deck_plans.plan_decks(commandants, pools, {"oracle-Rare": 1}, 50,
+                                   chosen_oracle_ids=["oracle-B", "oracle-A"])
+
+    plans = result["selection"]["plans"]
+    assert [plan["commander"]["name"] for plan in plans] == ["B", "A"]
+    assert next(c for c in plans[0]["core"] if c["name"] == "Rare")["owned"] is True
+    assert next(c for c in plans[1]["core"] if c["name"] == "Rare")["owned"] is False

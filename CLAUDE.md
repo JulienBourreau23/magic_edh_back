@@ -293,33 +293,59 @@ collection entière disponible : c'est le seul point de vue où ils sont
 comparables entre eux. Ne pas additionner ses colonnes de coût pour prévoir un
 groupe, elles ne s'additionnent pas.
 
-#### Un exemplaire est aussi pris quand il est dans un deck déjà monté
+#### Choisir les quatre commandants un par un
 
-La règle « un exemplaire ne peut être que dans un deck à la fois » était
-appliquée **entre les quatre decks du plan**, mais s'arrêtait à la porte des
-decks déjà enregistrés. Or la collection est justement alimentée par les decks
-cochés « déjà monté » : le plan reproposait donc des cartes physiquement rangées
-dans une autre boîte. Mesuré sur la collection réelle : **135 cartes du plan**
-étaient dans ce cas, dont un Arcane Signet demandé quatre fois alors que les
-quatre exemplaires sont déjà en deck.
+La page se lit de deux façons, et la réponse du back le dit (`after_selection`) :
 
-`decks_db.committed_quantities()` compte ce que les decks enregistrés
-immobilisent, `deck_plans.free_copies()` le soustrait (borné à zéro), et
-`reserve_existing_decks` — **vrai par défaut** — commande le tout, aussi bien à
-l'affichage qu'à la création, sans quoi le deck créé différerait de l'aperçu.
+- **sans sélection**, le tableau montre chaque commandant *monté seul*,
+  collection entière disponible — le seul point de vue où ils sont comparables
+  entre eux ;
+- **dès le premier choisi**, il montre ce que chaque commandant restant
+  pourrait encore monter **avec ce que les decks déjà choisis n'ont pas pris**
+  (`_next_candidates`). C'est là que la sélection devient honnête : un
+  commandant parfait sur la collection entière peut s'effondrer une fois qu'un
+  premier deck a pris les mêmes cartes, et un autre remonter parce que ses
+  cartes n'intéressaient personne. Les évaluer sur une collection intacte
+  reviendrait à proposer quatre fois le même deck.
+
+Le remplacement n'a rien de spécial à coder : une carte prise n'est plus
+disponible, donc le constructeur retient la suivante du **même rôle** dans le
+vivier restant. Quand il n'y en a plus, le créneau reste vide et le compte
+« noyau 51/63 » le dit. « Trop de manques » n'est pas un seuil inventé : c'est
+l'écart aux repères de rôle du projet (`role_gap`), et la ligne reste cliquable
+— c'est un avertissement, pas une interdiction.
+
+**L'ordre des clics décide du service** (`preserve_order`), contrairement au
+choix automatique qui sert « le plus contraint d'abord ». Sans ça, ajouter un
+troisième deck rebattrait le contenu des deux premiers, et l'écran cesserait de
+raconter ce qu'on vient de faire.
+
+#### Les decks déjà enregistrés ne sont pas réservés par défaut
+
+La règle « un exemplaire ne peut être que dans un deck à la fois » vaut
+**entre les quatre decks du plan** — vérifié sur la collection réelle : 392
+créneaux, aucune carte employée au-delà du stock.
+
+Face aux decks *déjà enregistrés*, c'est un choix, pas une évidence
+(`reserve_existing_decks`, **faux par défaut**) : monter quatre decks
+équilibrés pour jouer entre amis, c'est justement rebattre les cartes de ceux
+qu'on a déjà. L'interrupteur « mes decks gardent leurs cartes » sert le cas
+inverse — monter quatre decks *de plus* — et s'appuie sur
+`decks_db.committed_quantities()` + `deck_plans.free_copies()` (soustraction
+bornée à zéro : un deck importé sans la case « déjà monté » n'a pas alimenté la
+collection, ses cartes peuvent donc être engagées sans être possédées).
 
 Deux points à garder en tête :
 
 - **Rien en base ne dit qu'un deck est *physiquement* monté** : la case « ce
   deck est déjà monté » de l'import alimente la collection mais n'est pas
-  conservée. Tous les decks enregistrés sont donc supposés montés, et
-  l'interrupteur « je peux les démonter » existe pour le cas contraire. Une
+  conservée. Réserver suppose donc que tous les decks enregistrés le sont. Une
   colonne `assembled` sur `decks` serait la vraie réponse si le besoin se
   précise.
-- **La réservation n'a rien coûté ici** : sur la collection réelle, 480
-  exemplaires immobilisés sur 2 111, et le plan sort toujours quatre decks
-  complets (63/63, tous les repères de rôle tenus). Seul le quatrième
-  commandant change.
+- **Réserver ne coûtait rien en qualité** sur la collection réelle : 480
+  exemplaires immobilisés sur 2 111, et le plan sortait toujours quatre decks
+  complets. Seul le quatrième commandant changeait. Le défaut se justifie donc
+  par l'intention, pas par le résultat.
 
 #### Le mode « sans achat »
 

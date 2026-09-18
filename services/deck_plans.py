@@ -384,7 +384,8 @@ def _motif(item: dict) -> str:
 
 def _build_group(commanders: list[dict], pools: dict[str, list[dict]], owned: dict[str, int],
                  max_price: float, natural: dict[str, int], target_bracket: int | None,
-                 find_combos=None, owned_only: bool = False) -> dict:
+                 find_combos=None, owned_only: bool = False,
+                 preserve_order: bool = False) -> dict:
     """
     Monte les quatre decks d'un groupe sur une collection partagée.
 
@@ -392,11 +393,20 @@ def _build_group(commanders: list[dict], pools: dict[str, list[dict]], owned: di
     le moins de cartes possédées dans son pool choisit en premier. Servir
     l'abondant d'abord lui ferait prendre des exemplaires dont l'autre a un
     besoin exclusif, et la facture monterait sans rien apporter.
+
+    `preserve_order` sert la sélection **choisie à la main**, commandant après
+    commandant : c'est alors l'ordre des clics qui décide, sinon ajouter un
+    troisième deck rebattrait le contenu des deux premiers et l'écran cesserait
+    de raconter ce qu'on vient de faire.
+
+    Le stock restant est renvoyé sous `_available_after` : c'est lui qui permet
+    de classer les commandants suivants sur ce qui reste vraiment, et non sur
+    une collection intacte.
     """
     target = target_bracket or min(natural[str(c["oracle_id"])] for c in commanders)
     available = dict(owned)
 
-    ordered = sorted(
+    ordered = commanders if preserve_order else sorted(
         commanders,
         key=lambda commander: (
             sum(1 for card in pools[str(commander["oracle_id"])] if card["owned_quantity"] > 0),
@@ -413,6 +423,7 @@ def _build_group(commanders: list[dict], pools: dict[str, list[dict]], owned: di
     return {
         "target_bracket": target,
         "plans": plans,
+        "_available_after": available,
         "shopping_list": shopping_list,
         "total_cost_eur": round(sum(item["total_eur"] for item in shopping_list), 2),
         "missing_count": sum(item["quantity"] for item in shopping_list),
@@ -476,10 +487,16 @@ def plan_decks(commanders: list[dict], pools: dict[str, list[dict]], owned: dict
             return {"error": f"Commandant inconnu ou sans données EDHREC : {', '.join(missing)}",
                     "commanders": [_comparison_row(plan) for plan in comparison],
                     "selection": None}
+        # Sélection choisie à la main : l'ordre des clics décide du service,
+        # chaque deck prenant dans ce que le précédent a laissé.
         group = _build_group([by_id[oid] for oid in chosen_oracle_ids], pools, owned,
-                             max_price, natural, target_bracket, find_combos, owned_only)
-        return _result(comparison, group, max_price, len(usable), forced=True,
-                       owned_only=owned_only)
+                             max_price, natural, target_bracket, find_combos, owned_only,
+                             preserve_order=True)
+        suivants = _next_candidates(usable, chosen_oracle_ids, pools, group["_available_after"],
+                                    max_price, target_bracket, find_combos, owned_only)
+        return _result(suivants or comparison, group, max_price, len(usable), forced=True,
+                       owned_only=owned_only, after_selection=bool(suivants),
+                       remaining_slots=max(0, DECKS_TO_BUILD - len(chosen_oracle_ids)))
 
     # Au-delà du garde-fou, on ne garde que les moins chers à monter seuls : un
     # commandant qui coûte déjà cher tout seul ne devient pas bon marché en
@@ -498,7 +515,38 @@ def plan_decks(commanders: list[dict], pools: dict[str, list[dict]], owned: dict
         key=_group_score,
     )
     return _result(comparison, best, max_price, len(usable), forced=False,
-                   owned_only=owned_only)
+                   owned_only=owned_only, remaining_slots=0)
+
+
+def _next_candidates(usable: list[dict], chosen_oracle_ids: list[str],
+                     pools: dict[str, list[dict]], available: dict[str, int],
+                     max_price: float, target_bracket: int | None,
+                     find_combos=None, owned_only: bool = False) -> list[dict]:
+    """
+    Les commandants encore disponibles, montés **sur ce qu'il reste** une fois
+    les decks déjà choisis servis.
+
+    C'est ce qui rend la sélection pas à pas honnête : un commandant qui semble
+    parfait sur la collection entière peut s'effondrer une fois qu'un premier
+    deck a pris les mêmes cartes, et un autre remonter parce que ses cartes
+    n'intéressaient personne. Les évaluer sur une collection intacte reviendrait
+    à proposer quatre fois le même deck.
+
+    Vide quand les quatre places sont prises — il n'y a plus rien à proposer.
+    """
+    if len(chosen_oracle_ids) >= DECKS_TO_BUILD:
+        return []
+
+    deja = set(chosen_oracle_ids)
+    plans = [
+        build_deck(commander, pools[str(commander["oracle_id"])], dict(available),
+                   max_price, target_bracket, find_combos, owned_only)
+        for commander in usable
+        if str(commander["oracle_id"]) not in deja
+    ]
+    # Équilibre d'abord, remplissage ensuite, prix en dernier : le même ordre de
+    # priorité que le choix automatique d'un groupe.
+    return sorted(plans, key=lambda plan: (plan["role_gap"], -plan["core_size"], plan["cost_eur"]))
 
 
 def _comparison_row(plan: dict) -> dict:
@@ -511,8 +559,17 @@ def _comparison_row(plan: dict) -> dict:
 
 
 def _result(comparison: list[dict], group: dict, max_price: float,
-            commanders_compared: int, forced: bool, owned_only: bool = False) -> dict:
+            commanders_compared: int, forced: bool, owned_only: bool = False,
+            after_selection: bool = False, remaining_slots: int = 0) -> dict:
+    # Le stock restant sert au calcul, pas au client : mille six cents entrées
+    # n'ont rien à faire dans la réponse.
+    group.pop("_available_after", None)
     return {
+        # Vrai quand le tableau montre les commandants évalués **sur ce qui
+        # reste**, et non montés seuls sur la collection entière : les deux
+        # lectures ne se comparent pas.
+        "after_selection": after_selection,
+        "remaining_slots": remaining_slots,
         "core_size": CORE_SIZE,
         "land_slots": LAND_SLOTS,
         "decks_to_build": DECKS_TO_BUILD,

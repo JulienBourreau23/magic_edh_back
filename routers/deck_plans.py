@@ -41,7 +41,7 @@ class CreateDecksRequest(BaseModel):
     max_price: float = Field(default=DEFAULT_MAX_PRICE_EUR, gt=0)
     target_bracket: int | None = Field(default=None, ge=1, le=5)
     owned_only: bool = False
-    reserve_existing_decks: bool = True
+    reserve_existing_decks: bool = False
 
 
 @router.get("")
@@ -59,9 +59,10 @@ def build_deck_plans(
                     "ce soir, sans aucun achat",
     ),
     reserve_existing_decks: bool = Query(
-        default=True,
-        description="les decks déjà enregistrés gardent leurs cartes : un exemplaire rangé "
-                    "dans une boîte ne sert pas à monter un autre deck",
+        default=False,
+        description="les decks déjà enregistrés gardent leurs cartes. Faux par défaut : "
+                    "monter quatre decks équilibrés, c'est justement rebattre les cartes "
+                    "de ceux qu'on a déjà",
     ),
 ):
     """
