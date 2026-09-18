@@ -1,4 +1,6 @@
 """db/decks.py — decks, deck_cards, deck_import_issues."""
+from datetime import datetime, timezone
+
 from psycopg2.extras import execute_values
 
 from db.core import get_conn
@@ -83,22 +85,42 @@ def add_import_issues(deck_id: int, issues: list[tuple[str, str]]) -> None:
             )
 
 
-def list_decks() -> list[dict]:
+def list_decks(archived: bool = False) -> list[dict]:
+    """
+    Les decks actifs, ou les archivés.
+
+    Un deck archivé n'est pas supprimé : il sort seulement des écrans qui
+    parlent de ce qu'on joue. Il reste donc **hors** du panel de performance,
+    de l'équilibrage et de la comparaison, sans quoi archiver ne changerait
+    rien à ce que le site raconte.
+    """
     with get_conn() as conn:
         with conn.cursor() as cur:
             cur.execute(
-                """
-                SELECT d.id, d.name, d.format, d.created_at,
+                f"""
+                SELECT d.id, d.name, d.format, d.created_at, d.archived_at,
                        c.name AS commander_name, fr.printed_name AS commander_name_fr,
                        c.image_uri AS commander_image_uri,
                        (SELECT COALESCE(SUM(dc.quantity), 0) FROM deck_cards dc WHERE dc.deck_id = d.id) AS card_count
                 FROM decks d
                 LEFT JOIN cards c ON c.scryfall_id = d.commander_scryfall_id
                 LEFT JOIN card_names_fr fr ON fr.oracle_id = c.oracle_id
-                ORDER BY d.created_at DESC
+                WHERE d.archived_at IS {'NOT NULL' if archived else 'NULL'}
+                ORDER BY {'d.archived_at DESC' if archived else 'd.created_at DESC'}
                 """
             )
             return cur.fetchall()
+
+
+def set_archived(deck_id: int, archived: bool) -> bool:
+    """Range un deck, ou le remet en service. Aucune carte n'est touchée."""
+    with get_conn() as conn:
+        with conn.cursor() as cur:
+            cur.execute(
+                "UPDATE decks SET archived_at = %s WHERE id = %s",
+                (datetime.now(timezone.utc) if archived else None, deck_id),
+            )
+            return cur.rowcount > 0
 
 
 def get_deck(deck_id: int) -> dict | None:

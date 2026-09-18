@@ -271,14 +271,14 @@ def _describe(commander: dict, chosen: list[dict], core_cards: list[dict],
         "bracket": deck_analysis.bracket_estimate(
             bracket_input, find_combos(bracket_input) if find_combos else None),
         "avg_inclusion": round(sum(inclusions) / len(inclusions), 3) if inclusions else 0.0,
-        "lands": _land_plan(commander, pool, available, core_cards),
+        "lands": land_plan(commander, pool, available, core_cards),
     }
 
 
-def _land_plan(commander: dict, pool: list[dict], available: dict[str, int],
-               core_cards: list[dict]) -> dict:
+def land_plan(commander: dict, pool: list[dict], available: dict[str, int],
+              core_cards: list[dict], slots: int = LAND_SLOTS) -> dict:
     """
-    Les 36 terrains, à coût nul : les terrains non-basiques déjà possédés (et
+    La manabase, à coût nul : les terrains non-basiques déjà possédés (et
     encore libres) d'abord, le reste en terrains de base répartis selon les
     symboles de mana réellement demandés par le noyau.
 
@@ -287,14 +287,14 @@ def _land_plan(commander: dict, pool: list[dict], available: dict[str, int],
     """
     owned_lands = []
     for card in pool:
-        if len(owned_lands) >= LAND_SLOTS:
+        if len(owned_lands) >= slots:
             break
         oracle_id = str(card["oracle_id"])
         if categories.is_land(card) and available.get(oracle_id, 0) > 0:
             available[oracle_id] -= 1
             owned_lands.append(_summarize(card, owned=True, role=categories.LAND))
 
-    slots = max(0, LAND_SLOTS - len(owned_lands))
+    slots = max(0, slots - len(owned_lands))
     identity = [color for color in commander["color_identity"] if color in BASIC_LAND_BY_COLOR]
     if not identity or not slots:
         return {"owned_nonbasic": owned_lands,

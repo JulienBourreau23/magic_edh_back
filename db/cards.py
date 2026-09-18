@@ -233,6 +233,55 @@ def search(query: str, limit: int = 20) -> list[dict]:
             return cur.fetchall()
 
 
+def buildable_pool(identity: list[str], format: str, commander_oracle_id: str) -> list[dict]:
+    """
+    Tout ce que la collection permet de mettre dans ce deck : cartes possédées,
+    légales dans le format, dont l'identité de couleur tient dans celle du
+    commandant. **Terrains compris** — on construit aussi la manabase ici.
+
+    Les artefacts et cartes incolores passent sans clause particulière : leur
+    identité est vide, donc incluse dans n'importe laquelle.
+
+    `inclusion_rate` dit ce qu'EDHREC voit joué derrière ce commandant. Il sert
+    à classer le vivier par pertinence plutôt que par ordre alphabétique ; il
+    est nul pour les cartes qu'EDHREC ne connaît pas avec lui, ce qui n'est pas
+    un défaut : c'est la moitié d'une collection.
+
+    Le vivier part **entier** au navigateur : quelques centaines de lignes
+    tiennent dans une réponse, et un aller-retour par filtre rendrait la
+    construction poussive.
+    """
+    legality_column = LEGALITY_COLUMNS[format]
+    with get_conn() as conn:
+        with conn.cursor() as cur:
+            cur.execute(
+                f"""
+                SELECT c.scryfall_id, c.oracle_id, c.name, fr.printed_name AS name_fr,
+                       c.mana_cost, c.cmc, c.type_line, c.color_identity, c.price_eur,
+                       c.image_uri, c.image_downloaded, c.categories, c.game_changer,
+                       c.edhrec_rank, c.keywords, col.quantity AS owned_quantity,
+                       COALESCE(w.quantity, 0) AS wanted_quantity,
+                       r.inclusion_rate
+                FROM collection col
+                JOIN cards_cheapest c ON c.oracle_id = col.oracle_id
+                LEFT JOIN card_names_fr fr ON fr.oracle_id = c.oracle_id
+                LEFT JOIN wishlist w ON w.oracle_id = c.oracle_id
+                LEFT JOIN (
+                    SELECT card_oracle_id, max(inclusion_rate) AS inclusion_rate
+                    FROM commander_recommendations
+                    WHERE commander_oracle_id = %(commander)s::uuid
+                    GROUP BY card_oracle_id
+                ) r ON r.card_oracle_id = c.oracle_id
+                WHERE c.{legality_column}
+                  AND c.color_identity <@ %(identity)s::text[]
+                  AND c.oracle_id <> %(commander)s::uuid
+                ORDER BY r.inclusion_rate DESC NULLS LAST, c.edhrec_rank NULLS LAST, c.name
+                """,
+                {"identity": sorted(identity), "commander": commander_oracle_id},
+            )
+            return cur.fetchall()
+
+
 def find_candidates(color_identity: set[str], category: str, exclude_oracle_ids: list[str],
                     max_price: float, format: str = "commander", limit: int = 8,
                     exclude_game_changers: bool = False,

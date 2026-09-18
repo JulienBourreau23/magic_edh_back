@@ -511,6 +511,8 @@ app/
 ├── balance/page.tsx                 # équilibrage de 4 decks + liste d'achats PDF
 ├── matchup/page.tsx                 # comparaison de deux decks
 ├── performance/page.tsx             # qui gagne, et avec quel archétype
+├── build/page.tsx                   # atelier : construire carte par carte
+├── archives/page.tsx                # decks rangés, remise en service
 └── login/page.tsx                   # seule page utilisable sans jeton
 components/
     CardTile, CardBinder, CardSearch, CollectionFilters, CompetitiveDeck,
@@ -1204,6 +1206,59 @@ donné huit couleurs sans information et enterré la seule chose qui compte,
 l'ordre des longueurs. Filtre et pagination sont côté navigateur : la réponse
 tient en une requête, la repayer à chaque clic de page serait du gaspillage.
 
+
+## Construire un deck à la main (`/build`)
+
+Le geste du classeur : le format, un commandant qu'on prend, puis les cartes
+qui peuvent aller avec lui. Le site ne décide rien ici — il propose, il compte,
+il évalue.
+
+**Rien n'est écrit tant que le bouton « enregistrer » n'est pas cliqué.** Le
+brouillon vit dans le `localStorage` du navigateur, ce qui le fait survivre à un
+rechargement sans jamais devenir un deck. C'est la promesse centrale de la page,
+et un test la fige : évaluer ne crée aucun deck.
+
+Quatre appuis, tous réutilisés plutôt que réécrits :
+
+- **Le vivier** (`cards_db.buildable_pool`) : ce que la collection permet de
+  mettre dans *ce* deck — identité de couleur, légalité du format, terrains
+  compris, puisqu'on construit aussi la manabase. Les artefacts passent sans
+  clause particulière : leur identité est vide, donc incluse partout. Le vivier
+  part **entier** au navigateur (quelques centaines de lignes), qui filtre et
+  cherche sans aller-retour ; il est classé par taux d'inclusion EDHREC pour ce
+  commandant, l'ordre alphabétique ne disant rien de ce qui va avec lui.
+- **L'assistance aux terrains** appelle `deck_plans.land_plan`, le calcul de la
+  page « Monter 4 decks » : non-basiques possédés d'abord (gratuits et meilleurs
+  qu'un basique), puis basiques au prorata des symboles de mana réellement
+  demandés, commandant compris. L'endpoint renvoie les basiques **avec leur
+  impression** : le conseil ne fait pas que les nommer, le navigateur doit
+  pouvoir les poser.
+- **L'évaluation** est celle de la fiche de deck, à l'identique — bracket,
+  manabase profonde, rôles, courbe, prix, alertes de légalité. Un brouillon doit
+  se lire avec les mêmes chiffres que le deck qu'il deviendra, sinon
+  enregistrer changerait le diagnostic.
+- **La comparaison** passe par `matchup.compare`, la même que `/matchup`, avec
+  `id: None` pour le brouillon : confronter avant d'enregistrer est tout
+  l'intérêt.
+
+**Changer de commandant vide le brouillon** : l'identité de couleur change, et
+garder des cartes devenues illégales serait un piège silencieux.
+
+### Archiver plutôt que supprimer
+
+`decks.archived_at` (migration 018) — une date et non un booléen : « quand
+l'ai-je rangé » se lit sur la page d'archives, et `NULL` dit « actif » sans
+seconde colonne à tenir cohérente.
+
+**Archiver ne supprime rien et ne touche pas à la collection.** Le deck sort
+seulement des écrans qui parlent de ce qu'on joue : la liste des decks,
+l'équilibrage, la comparaison, et le **panel du classement de performance** —
+`decks_db.list_decks()` filtre par défaut, donc tous ces écrans suivent sans
+rien changer. Sans ce filtre, archiver n'aurait rien changé à ce que le site
+raconte.
+
+Le deck qu'on vient de construire s'archive directement depuis l'atelier, une
+fois enregistré : ranger un deck d'essai est le cas le plus fréquent.
 
 ## Qui gagne, et avec quel archétype (`/performance`)
 

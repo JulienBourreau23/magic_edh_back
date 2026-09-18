@@ -56,8 +56,9 @@ def import_deck(payload: ImportDeckRequest):
 
 
 @router.get("")
-def list_decks():
-    return decks_db.list_decks()
+def list_decks(archived: bool = Query(default=False,
+                                     description="lister les decks rangés plutôt que les actifs")):
+    return decks_db.list_decks(archived=archived)
 
 
 def _synergies(cards: list[dict]) -> list[dict]:
@@ -96,6 +97,18 @@ def get_deck(deck_id: int):
 @router.patch("/{deck_id}")
 def update_deck(deck_id: int, payload: UpdateDeckRequest):
     if not decks_db.update_deck(deck_id, payload.name, payload.format, payload.commander_scryfall_id):
+        raise HTTPException(404, "Deck introuvable")
+    return decks_db.get_deck(deck_id)
+
+
+@router.post("/{deck_id}/archive")
+def archive_deck(deck_id: int, archived: bool = Query(default=True)):
+    """
+    Range un deck, ou le remet en service. **Aucune carte n'est touchée** :
+    archiver ne parle que de ce qu'on joue, pas de ce qu'on possède — la
+    collection ne bouge pas, et le deck reste consultable dans les archives.
+    """
+    if not decks_db.set_archived(deck_id, archived):
         raise HTTPException(404, "Deck introuvable")
     return decks_db.get_deck(deck_id)
 
