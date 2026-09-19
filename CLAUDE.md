@@ -62,6 +62,7 @@ backend/
 │   ├── commanders.py         # commandants possédés + recommandations EDHREC
 │   ├── themes.py             # archétypes EDHREC d'un commandant et leurs cartes
 │   ├── archetypes.py         # archétypes du format, et ce qu'ils coûteraient
+│   ├── rules.py              # banlists, Game Changers
 │   └── combos.py             # combos à deux cartes présents dans un deck
 ├── routers/
 │   ├── decks.py              # import, CRUD, simulation, suggestions
@@ -73,6 +74,7 @@ backend/
 │   ├── deck_plans.py         # plan de 4 decks à monter
 │   ├── competitive.py        # construction d'un deck compétitif
 │   ├── archetypes.py         # catalogue des archétypes et leurs articles
+│   ├── rules.py              # banlists, brackets, Game Changers
 │   ├── balance.py            # équilibrage d'un groupe de decks
 │   ├── matchup.py            # comparaison de deux decks
 │   ├── auth.py               # /auth/login, /auth/me
@@ -97,6 +99,7 @@ backend/
 │   ├── combos.py             # combos présents dans un deck
 │   ├── edhrec.py             # récupération EDHREC (module isolé exprès)
 │   ├── archetype_notes.py    # le principe de chaque archétype, écrit à la main
+│   ├── bracket_rules.py      # le texte des brackets + la démonstration par le moteur
 │   ├── spellbook.py          # import du catalogue Commander Spellbook
 │   ├── magic_ville_pdf.py    # découpage d'une planche de proxys
 │   └── card_images.py        # téléchargement à la demande
@@ -146,7 +149,8 @@ backend/
    resterait invisible. Et si la colonne vient de Scryfall, il faut **en plus**
    relancer `sync_scryfall.py` : elle naît à sa valeur par défaut partout, et
    seule une synchronisation complète la renseigne (cas de
-   `banned_as_commander_duel`, migration 015).
+   `banned_as_commander_duel`, migration 015 ; `banned_commander`,
+  `banned_duel` et `set_type`, migration 021).
 
 ### Collection et minimisation des achats
 
@@ -514,6 +518,7 @@ app/
 ├── competitive/page.tsx             # deck compétitif bâti sur la collection
 ├── archetypes/page.tsx              # catalogue des archétypes du format
 ├── archetypes/[slug]/page.tsx       # l'article d'un archétype
+├── regles/page.tsx                  # banlists, brackets, Game Changers
 ├── balance/page.tsx                 # équilibrage de 4 decks + liste d'achats PDF
 ├── matchup/page.tsx                 # comparaison de deux decks
 ├── performance/page.tsx             # qui gagne, et avec quel archétype
@@ -848,6 +853,89 @@ jargon importé.
 - Les tests qui écrivent en base **se sautent proprement** quand Postgres est
   injoignable (`pytestmark = skipif`), pour que la suite reste lançable
   n'importe où.
+
+## Les règles du format (`/regles`)
+
+Ce qu'on subit plutôt que ce qu'on choisit : les deux banlists, le système de
+brackets, la liste officielle des Game Changers. Trois listes, **aucune table
+et aucun flow Kestra propres à cette page** — ce sont des colonnes de `cards`,
+donc le flow mensuel `sync-scryfall` les rafraîchit déjà. En ajouter un
+referait le même travail deux fois, ce que le projet refuse par principe (un
+seul ordonnanceur par travail). C'est le même raisonnement que `/must-have`,
+qui vit d'`edhrec_rank`.
+
+### « Bannie » n'est pas « pas légale », et l'écart est d'un facteur quarante
+
+`legal_commander` est un booléen : il confond une carte **interdite** et une
+carte qui n'a jamais été jouable en tournoi. Mesuré : **2 327 cartes** sont
+`NOT legal_commander` — Un-sets, cartes playtest, 30th Anniversary, jetons de
+Conspiracy — quand la banlist du multijoueur en compte cinquante-huit. La
+requête évidente aurait donc rendu quarante fois trop de lignes, et surtout les
+mauvaises.
+
+Scryfall publie la valeur exacte (`legalities.commander` vaut `banned` et non
+`not_legal`), et le sync la jetait — **exactement l'information perdue que
+`restricted` avant la migration 015**. D'où `banned_commander` et `banned_duel`
+(migration 021).
+
+### Les deux familles de bannis qu'il faut séparer
+
+Même avec la bonne colonne, Scryfall annonce 83 cartes en multijoueur et 250 en
+duel là où un joueur en attend une cinquantaine. Le reste est banni **parce que
+ce ne sont pas des cartes de partie**, et cela se reconnaît de deux façons :
+
+- par le **type** : Conspiracies (25, jouées depuis l'extérieur du deck en
+  draft) et Stickers d'Unfinity (48) ;
+- par l'**édition** : Unfinity, éditions anniversaire, decks de championnat du
+  monde — `funny` et `memorabilia`, 79 cartes rien que pour Unfinity en duel.
+  D'où la colonne `set_type`.
+
+**Le critère d'édition se juge sur toutes les impressions, jamais sur celle que
+`cards_cheapest` retient**, et c'est la subtilité qui décide de tout :
+l'impression la moins chère de Black Lotus est un proxy « 30th Anniversary »
+(memorabilia). Juger sur elle retirerait de la banlist Black Lotus, les cinq
+Moxen, Ancestral Recall et Chaos Orb — les cartes les plus célèbres du jeu. Une
+carte n'est donc écartée que si **aucune** de ses impressions n'appartient à
+une vraie édition. Un test le fige.
+
+Ces cartes sont **montrées à part, pas masquées** : les cacher ferait mentir le
+total, les mélanger rendrait la liste illisible. Résultat affiché : 58 bannies
+en multijoueur (+25 hors tournoi), 99 en duel (+151).
+
+Deux rappels que la page porte à l'écran, parce qu'ils se paient en partie :
+
+- **les deux banlists ne se déduisent pas l'une de l'autre.** Le duel est plus
+  strict dans l'ensemble, mais **dix-neuf cartes** sont bannies en multijoueur
+  et légales en duel — Dockside Extortionist, Griselbrand, Leovold. Chaque
+  carte porte donc les deux drapeaux, et l'écran marque celles dont le statut
+  change ;
+- **« interdite comme commandant » n'est pas « bannie »** : les 27 cartes
+  `restricted` du duel restent jouables dans les 99. Section séparée, et vide
+  côté multijoueur puisque le format n'a pas d'équivalent.
+
+### Les brackets : la règle d'un côté, ce que le site en constate de l'autre
+
+Le texte du Commander Format Panel est recopié à la main
+(`services/bracket_rules.py`) — c'est du texte, aucune source ne le publie en
+machine, même situation que les notes d'archétypes.
+
+Mais **le lien entre la règle et le code n'est pas recopié : il est exécuté.**
+Chaque critère porte un deck minimal de démonstration qu'on passe au vrai
+`deck_analysis.bracket_estimate`, et c'est sa réponse qui s'affiche — « un deck
+avec 4 Game Changers → Bracket 4-5 ». Écrire ce seuil dans une phrase l'aurait
+laissé dériver le jour où il change ; ici la page suit le code, et un test
+fige la correspondance.
+
+La page nomme aussi **ce qui n'est pas mesuré** : le stax (pas un critère
+officiel), la densité de tuteurs (le texte en parle sans fixer de seuil), le
+« plan de fin de partie » et l'enchaînement des tours supplémentaires (une
+liste de cartes ne le dit pas). Les taire ferait passer ces choix pour des
+oublis.
+
+**Pas d'`ensure_images`** : plus de quatre cents visuels au premier affichage,
+même arbitrage que `/must-have`. Le tri se fait sur le **nom affiché** et non
+sur le nom anglais renvoyé par le serveur, sans quoi une liste écrite en
+français serait classée dans un ordre qui n'en est pas un.
 
 ## Combos à deux cartes et bracket
 

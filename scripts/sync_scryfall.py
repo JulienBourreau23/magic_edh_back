@@ -34,7 +34,8 @@ INSERT INTO cards (
     colors, color_identity, keywords, power, toughness, loyalty,
     set_code, collector_number, rarity, legal_commander, price_eur,
     card_faces, image_uri, game_changer, legal_duel, produced_mana, edhrec_rank,
-    categories, price_eur_foil, banned_as_commander_duel
+    categories, price_eur_foil, banned_as_commander_duel,
+    banned_commander, banned_duel, set_type
 ) VALUES %s
 ON CONFLICT (scryfall_id) DO UPDATE SET
     oracle_id = EXCLUDED.oracle_id,
@@ -58,6 +59,9 @@ ON CONFLICT (scryfall_id) DO UPDATE SET
     game_changer = EXCLUDED.game_changer,
     legal_duel = EXCLUDED.legal_duel,
     banned_as_commander_duel = EXCLUDED.banned_as_commander_duel,
+    banned_commander = EXCLUDED.banned_commander,
+    banned_duel = EXCLUDED.banned_duel,
+    set_type = EXCLUDED.set_type,
     produced_mana = EXCLUDED.produced_mana,
     edhrec_rank = EXCLUDED.edhrec_rank,
     categories = EXCLUDED.categories,
@@ -118,6 +122,15 @@ def _row(card: dict) -> tuple:
         classify(card.get("type_line"), card.get("oracle_text"), card.get("produced_mana")),
         _price(prices.get("eur_foil")),
         _duel_legality(card) == "restricted",
+        # **« Bannie » n'est pas « pas légale ».** Le booléen `legal_commander`
+        # confond les deux, si bien qu'une banlist tirée de lui rendrait
+        # 2 327 cartes — Un-sets, cartes playtest, 30th Anniversary — au lieu
+        # des 83 réellement bannies. Scryfall publie la valeur exacte, et on la
+        # jetait : c'est la même information perdue que `restricted` avant la
+        # migration 015.
+        (card.get("legalities") or {}).get("commander") == "banned",
+        _duel_legality(card) == "banned",
+        card.get("set_type"),
     )
 
 

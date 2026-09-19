@@ -13,7 +13,7 @@ from config import CARD_IMAGES_DIR, CORS_ORIGINS, DB_POOL_MAX
 from db.core import close_pool
 from auth import require_auth
 from routers import (admin, archetypes, auth, balance, budget_lands, build, cards,
-                     collection, competitive, deck_ideas,
+                     collection, competitive, deck_ideas, rules,
                      deck_plans, decks, matchup, must_have, performance, videos,
                      wishlist)
 
@@ -62,6 +62,7 @@ app.include_router(deck_ideas.router, dependencies=protected)
 app.include_router(deck_plans.router, dependencies=protected)
 app.include_router(competitive.router, dependencies=protected)
 app.include_router(archetypes.router, dependencies=protected)
+app.include_router(rules.router, dependencies=protected)
 app.include_router(wishlist.router, dependencies=protected)
 app.include_router(must_have.router, dependencies=protected)
 app.include_router(build.router, dependencies=protected)
