@@ -68,6 +68,26 @@ def budget_lands(
             "videos": conseils.get(cycle["key"], []),
         })
 
+    # Les sorts à verso terrain forment leur propre groupe : ce ne sont pas un
+    # cycle au sens du texte oracle, mais ce sont bien des terrains à avoir.
+    modaux = [
+        land for land in lands_db.modal_lands(sorted(couleurs), format)
+        if land["owned_quantity"] or (land["price_eur"] is not None
+                                      and float(land["price_eur"]) <= max_price)
+    ]
+    if modaux:
+        groupes.append({
+            "key": "mdfc",
+            "label": "Sorts avec un terrain au verso",
+            "condition": "Un sort qui se pose en terrain quand la main en manque : "
+                         "il ne coûte pas une place dans le deck.",
+            "cards": modaux,
+            "owned": sum(1 for card in modaux if card["owned_quantity"]),
+            "missing_cost_eur": round(sum(float(card["price_eur"] or 0) for card in modaux
+                                          if not card["owned_quantity"]), 2),
+            "videos": conseils.get("mdfc", []),
+        })
+
     return {
         "identity": sorted(couleurs),
         "max_price_eur": max_price,
