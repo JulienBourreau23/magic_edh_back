@@ -513,6 +513,7 @@ app/
 ├── performance/page.tsx             # qui gagne, et avec quel archétype
 ├── build/page.tsx                   # atelier : construire carte par carte
 ├── archives/page.tsx                # decks rangés, remise en service
+├── terrains-budget/page.tsx         # manabase budget par cycle
 └── login/page.tsx                   # seule page utilisable sans jeton
 components/
     CardTile, CardBinder, CardSearch, CollectionFilters, CompetitiveDeck,
@@ -1259,6 +1260,59 @@ raconte.
 
 Le deck qu'on vient de construire s'archive directement depuis l'atelier, une
 fois enregistré : ranger un deck d'essai est le cas le plus fréquent.
+
+## Terrains budget, par cycle (`/terrains-budget`)
+
+Une manabase ne s'achète pas carte par carte mais par **cycles** : checklands,
+tango, filtres, painlands, horizons… Chaque cycle compte une carte par paire de
+couleurs, donc « qu'est-ce qu'il me manque en B/G » a une réponse courte et
+exacte — mesuré sur la collection réelle : 21 cartes, 2 possédées, **9,05 €
+pour compléter**.
+
+**Les cycles sont constatés dans le texte oracle**, jamais saisis à la main :
+`services/land_cycles.py` ne contient que des motifs, la liste des cartes est le
+résultat d'une requête et suit donc les sorties de sets toute seule. Les motifs
+sont écrits une fois et joués des deux côtés — en SQL pour chercher, en Python
+pour classer (`_matches` reproduit la sémantique d'`ILIKE`) — parce que dix
+balayages du catalogue pour dix cycles seraient payés à chaque affichage.
+
+Les effectifs servent de garde-fou : tango 10, bounce 10, slow 10, check 11,
+filter 10. Un cycle qui gonflerait soudain signale un motif devenu trop large
+après une sortie de set. Le motif des filterlands a justement dû être resserré
+en regex (`{X}, {T}: Add`) : en `ILIKE` il ramassait soixante cartes.
+
+**Le plafond ne concerne que les achats** : un terrain possédé reste affiché
+quel que soit son prix, comme partout.
+
+### Ce qu'une vidéo apporte, et ce qu'elle n'apporte pas
+
+L'idée de départ était d'extraire des **noms de cartes** de vidéos « budget ».
+Mesuré sur une vidéo francophone de treize minutes :
+
+- **En acceptant un seul mot**, dix-huit trouvailles dont sept fausses —
+  « Concentration », « Dragons », « Embuscade », « Mutilation » sont des mots
+  français courants *et* des noms de cartes. **Deux mots minimum** : onze
+  trouvailles, un seul faux positif. C'est la règle retenue.
+- **Le rappel reste faible** et c'est structurel : les sous-titres automatiques
+  n'ont ni ponctuation ni majuscules et écorchent les noms propres.
+
+Le vrai gisement était ailleurs : **le chapitrage de la vidéo**, écrit par
+l'auteur, nommait dix cycles (« TANGO LANDS », « ODISSEY FILTERS »). Une vidéo
+de manabase ne recommande pas des cartes, elle recommande des familles — et une
+famille, le catalogue sait l'énumérer exactement. D'où `ALIASES` dans
+`land_cycles` : les mots par lesquels une chaîne francophone désigne un cycle.
+
+`videos` et `video_mentions` (migration 019) ne stockent **aucun texte de
+retranscription** : des identifiants de cartes, des clés de cycles, des comptes
+et le moment de la première mention — de quoi fabriquer un lien qui ouvre la
+vidéo au bon endroit. Ce qui se republierait n'a rien à faire en base.
+
+**C'est l'outil local qui parle à YouTube, jamais le serveur.**
+`magic_edh_tools/youtube_cards.py` (hors dépôt, hors déploiement) récupère
+retranscription et chapitrage, puis appelle `POST /videos/import`, qui croise et
+retient. Mettre YouTube dans le chemin d'un écran ajouterait une dépendance
+externe fragile — ils bloquent volontiers les adresses de serveurs — pour un
+usage qui reste ponctuel.
 
 ## Qui gagne, et avec quel archétype (`/performance`)
 
