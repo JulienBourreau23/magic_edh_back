@@ -259,7 +259,7 @@ NOTES: dict[str, dict] = {
                      "empêche de cibler ou de détruire.",
         "wins": "Par répétition, en général avec un exutoire gratuit et une "
                 "créature qui revient sans cesse.",
-        "watch": "Il faut un exutoire *sans coût de mana*, sinon la boucle "
+        "watch": "Il faut un exutoire « sans coût de mana », sinon la boucle "
                  "s'arrête au troisième tour faute de mana.",
     },
     "discard": {
@@ -336,7 +336,7 @@ NOTES: dict[str, dict] = {
                      "souffrir moins que les autres.",
         "wins": "Lentement, en verrouillant assez la table pour qu'une menace "
                 "modeste devienne suffisante.",
-        "watch": "Le stax n'est **pas** un critère officiel de bracket, mais "
+        "watch": "Le stax n'est pas un critère officiel de bracket, mais "
                  "il change une partie autant qu'un critère qui l'est. C'est "
                  "une conversation à avoir avant de jouer, pas après.",
     },
