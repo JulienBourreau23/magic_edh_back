@@ -42,6 +42,14 @@ case "${SSH_ORIGINAL_COMMAND:-}" in
     # streaming). À rejouer après chaque sortie de set, comme Scryfall.
     exec venv/bin/python scripts/sync_french_names.py
     ;;
+  archetypes)
+    # Le catalogue des archétypes du format (pages `/tags/` d'EDHREC) : une
+    # requête pour l'index, puis une par archétype au-dessus du plancher — 183
+    # sur les 270 recensés, soit 4 min 37 s mesurées avec la pause d'une
+    # seconde. Même raison que pour `edhrec` : trop long pour un endpoint
+    # HTTP, et il n'en existe d'ailleurs aucun pour cette synchronisation.
+    exec venv/bin/python scripts/sync_archetypes.py
+    ;;
   rank-commanders)
     # Classe les commandants possédés par victoire mesurée : des milliers de
     # parties simulées, plusieurs minutes. Ce n'est pas une synchronisation —
@@ -51,7 +59,7 @@ case "${SSH_ORIGINAL_COMMAND:-}" in
     ;;
   *)
     echo "Commande refusée : '${SSH_ORIGINAL_COMMAND:-<vide>}'." >&2
-    echo "Valeurs acceptées : scryfall, french-names, edhrec, rank-commanders." >&2
+    echo "Valeurs acceptées : scryfall, french-names, edhrec, archetypes, rank-commanders." >&2
     exit 2
     ;;
 esac

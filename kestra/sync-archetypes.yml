@@ -1,0 +1,65 @@
+# Flow Kestra — le catalogue des archétypes du format.
+#
+# **Deuxième source EDHREC du projet, et une question différente de
+# `sync-edhrec`.** Celui-là part des commandants possédés et demande ce qu'on
+# monte derrière eux ; celui-ci part des archétypes du format — y compris ceux
+# qu'aucun commandant de la collection ne joue — et alimente la page
+# « Archétypes », qui sert à découvrir ce qu'on ne joue pas encore.
+#
+# **SSH et non HTTP**, pour la même raison que le flow EDHREC : 183 archétypes
+# à une seconde de pause font 4 min 37 s (mesuré), et un endpoint synchrone
+# resté muet tout ce temps se fait couper — par Kestra d'abord
+# (`readIdleTimeout`), par Cloudflare ensuite (100 s). Contrairement à EDHREC,
+# il n'existe ici **aucun endpoint HTTP** : la seule autre façon de lancer
+# cette synchro est `python scripts/sync_archetypes.py`.
+#
+# **Mensuel et non hebdomadaire.** Un archétype du format agrège des centaines
+# de milliers de decks : ni la liste des archétypes ni leurs cartes de tête ne
+# bougent d'une semaine à l'autre. Le rythme est calé sur celui de Scryfall,
+# donc sur les sorties de sets, qui sont la seule chose qui change vraiment ce
+# catalogue.
+#
+# Prérequis dans Kestra (Namespace > KV Store) : les mêmes clés SSH que les
+# autres flows (mtg_back_ssh_host, _port, _user, _key).
+#
+# Écrit pour Kestra 1.3.31 OSS et le plugin `fs` 2.11.1.
+id: sync-archetypes
+namespace: mtg-edh
+
+description: |
+  Récupère le catalogue des archétypes d'EDHREC (pages /tags/) : pour chacun,
+  les commandants qui le pilotent et les cartes qui le caractérisent. Alimente
+  la page « Archétypes ».
+
+tasks:
+  - id: archetypes
+    type: io.kestra.plugin.fs.ssh.Command
+    host: "{{ kv('mtg_back_ssh_host') }}"
+    port: "{{ kv('mtg_back_ssh_port') }}"
+    username: "{{ kv('mtg_back_ssh_user') }}"
+    authMethod: PUBLIC_KEY
+    privateKey: "{{ kv('mtg_back_ssh_key') }}"
+    # Un seul mot : la clé étant contrainte par `command=`, ceci n'est pas une
+    # commande shell mais l'aiguillage lu par kestra-sync.sh.
+    commands:
+      - archetypes
+    # Large devant les cinq minutes mesurées : le nombre d'archétypes
+    # au-dessus du plancher peut croître avec le format.
+    timeout: PT30M
+    # Pas de retry, comme pour EDHREC : ce sont des centaines d'appels à un
+    # site communautaire gratuit, et chaque archétype est écrit dès qu'il est
+    # lu — une reprise ne perdrait que ce qui n'a pas encore été traité.
+
+triggers:
+  # Le lendemain du flow Scryfall, qui tombe le 1er à 2 h : les cartes
+  # nouvellement importées sont alors déjà en base, donc les `scryfall_id`
+  # renvoyés par EDHREC se joignent tous.
+  - id: mensuel
+    type: io.kestra.plugin.core.trigger.Schedule
+    cron: "0 3 2 * *"
+
+errors:
+  - id: alerte
+    type: io.kestra.plugin.core.log.Log
+    level: ERROR
+    message: "Échec de la synchronisation des archétypes — voir l'exécution {{ execution.id }}"

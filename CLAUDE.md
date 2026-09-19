@@ -60,7 +60,8 @@ backend/
 │   ├── collection.py         # ce qu'on possède, par oracle_id
 │   ├── wishlist.py           # ce qu'on envisage d'acheter — même clé, exprès
 │   ├── commanders.py         # commandants possédés + recommandations EDHREC
-│   ├── themes.py             # archétypes EDHREC et leurs cartes
+│   ├── themes.py             # archétypes EDHREC d'un commandant et leurs cartes
+│   ├── archetypes.py         # archétypes du format, et ce qu'ils coûteraient
 │   └── combos.py             # combos à deux cartes présents dans un deck
 ├── routers/
 │   ├── decks.py              # import, CRUD, simulation, suggestions
@@ -71,6 +72,7 @@ backend/
 │   ├── deck_ideas.py         # quel deck monter
 │   ├── deck_plans.py         # plan de 4 decks à monter
 │   ├── competitive.py        # construction d'un deck compétitif
+│   ├── archetypes.py         # catalogue des archétypes et leurs articles
 │   ├── balance.py            # équilibrage d'un groupe de decks
 │   ├── matchup.py            # comparaison de deux decks
 │   ├── auth.py               # /auth/login, /auth/me
@@ -94,6 +96,7 @@ backend/
 │   ├── must_have.py          # cartes à avoir, par type
 │   ├── combos.py             # combos présents dans un deck
 │   ├── edhrec.py             # récupération EDHREC (module isolé exprès)
+│   ├── archetype_notes.py    # le principe de chaque archétype, écrit à la main
 │   ├── spellbook.py          # import du catalogue Commander Spellbook
 │   ├── magic_ville_pdf.py    # découpage d'une planche de proxys
 │   └── card_images.py        # téléchargement à la demande
@@ -102,7 +105,8 @@ backend/
 │   ├── rebuild_cheapest_view.sql  # définition canonique de la vue matérialisée
 │   ├── sync_scryfall.py      # bulk data Scryfall -> cards (+ REFRESH)
 │   ├── sync_french_names.py  # alias français (bulk all_cards, ~400 Mo)
-│   ├── sync_edhrec.py        # recommandations et archétypes
+│   ├── sync_edhrec.py        # recommandations et archétypes par commandant
+│   ├── sync_archetypes.py    # catalogue des archétypes du format
 │   ├── sync_combos.py        # catalogue Commander Spellbook
 │   ├── backfill_categories.py # rejoue la classification sans retélécharger
 │   ├── decklist_from_pdf.py  # planche magic-ville -> decklist
@@ -508,6 +512,8 @@ app/
 ├── deck-ideas/[id]/page.tsx         # decklist proposée + remplacement par la collection
 ├── deck-plans/page.tsx              # comparaison par commandant + 4 decks à monter + PDF
 ├── competitive/page.tsx             # deck compétitif bâti sur la collection
+├── archetypes/page.tsx              # catalogue des archétypes du format
+├── archetypes/[slug]/page.tsx       # l'article d'un archétype
 ├── balance/page.tsx                 # équilibrage de 4 decks + liste d'achats PDF
 ├── matchup/page.tsx                 # comparaison de deux decks
 ├── performance/page.tsx             # qui gagne, et avec quel archétype
@@ -656,6 +662,21 @@ et un module isolé (`services/edhrec.py`). Deux règles à respecter :
 Les cartes y sont identifiées par leur `scryfall_id`, pas par leur nom : la
 jointure vers notre base est donc exacte, pas approximative.
 
+**Le libellé exact des sections compte, et il a déjà piégé le projet.** EDHREC
+écrit « Utility Artifacts » ; `WANTED_SECTIONS` demandait « Artifacts », qui ne
+correspond à **aucune** section. La liste entière était donc jetée en silence —
+sur les pages commandants comme sur les pages archétypes — et les viviers de
+`/deck-ideas`, `/deck-plans` et `/competitive` n'ont jamais vu Skullclamp, les
+bottes, ni les moteurs à artefacts ; seuls les rochers de mana passaient, par
+« Mana Artifacts ». Rien n'échouait : le vivier était seulement plus pauvre
+qu'il n'aurait dû. **La correction ne prend effet qu'après un
+`python scripts/sync_edhrec.py`**, comme toute correction de ce script. Un test
+fige le libellé.
+
+« Lands » reste volontairement hors de `WANTED_SECTIONS` : le noyau du projet
+est non-terrain partout, et faire entrer cinquante terrains par commandant
+changerait le contenu de trois pages sans que personne ne l'ait demandé.
+
 La même synchronisation est accessible de deux façons, avec **une seule
 implémentation** dans `services/edhrec.py` :
 
@@ -667,7 +688,7 @@ Kestra vit dans son propre LXC : l'appel HTTP lui évite de dupliquer le dépôt
 un venv et les identifiants Postgres. **L'ordonnanceur reste interchangeable** —
 rien dans le code ne dépend de Kestra, et les scripts CLI font le même travail.
 
-### Les quatre synchronisations, et pourquoi deux mécanismes
+### Les cinq synchronisations, et pourquoi deux mécanismes
 
 Les flows vivent dans `kestra/` (namespace `mtg-edh`, instance `lxc-kestra`,
 192.168.1.119). **Il n'y a pas de timer systemd** : un seul ordonnanceur, sinon
@@ -676,7 +697,8 @@ le même travail finirait par être lancé deux fois.
 | Flow | Syncs | Déclenchement | Planification |
 |---|---|---|---|
 | `sync-scryfall.yml` | `cards`, puis `card_names_fr` | SSH | 1er du mois, 2 h |
-| `sync-edhrec.yml` | recommandations et archétypes | SSH | lundi 4 h |
+| `sync-edhrec.yml` | recommandations et archétypes par commandant | SSH | lundi 4 h |
+| `sync-archetypes.yml` | catalogue des archétypes du format | SSH | 2 du mois, 3 h |
 | `sync-combos.yml` | catalogue Spellbook | HTTP | lundi 5 h |
 
 **Le choix HTTP / SSH suit la durée, pas la préférence**, et ce n'est pas un
@@ -694,8 +716,9 @@ semaine des centaines de pages qui n'ont pas bougé.
 **Kestra n'a pas de shell sur le back.** Sa clé publique est posée dans
 `authorized_keys` avec `command="…/deploy/kestra-sync.sh"`, qui force ce script
 quelle que soit la commande demandée ; celle-ci n'arrive que dans
-`$SSH_ORIGINAL_COMMAND` et sert d'aiguillage. Seuls `scryfall` et
-`french-names` sont acceptés, tout le reste sort en code 2. Ajouter une
+`$SSH_ORIGINAL_COMMAND` et sert d'aiguillage. Seuls `scryfall`, `french-names`,
+`edhrec`, `archetypes` et `rank-commanders` sont acceptés, tout le reste sort
+en code 2. Ajouter une
 synchronisation par SSH, c'est donc **ajouter un `case` dans ce script**, pas
 seulement une tâche dans le flow.
 
@@ -913,8 +936,9 @@ corrections, toutes nommées dans le rapport.
 
 ## Construire un deck compétitif (`/competitive`)
 
-Quatre étapes : **le format d'abord**, puis un commandant de la collection,
-l'archétype, le deck.
+Cinq étapes : **le format d'abord**, puis l'archétype *si on le connaît déjà*
+(facultatif), un commandant de la collection, l'archétype à nouveau si on ne
+l'a pas choisi, le deck.
 
 L'ordre n'est pas cosmétique : **la liste des commandants dépend du format, dans
 les deux sens**. Edgar Markov est légal en multi et banni en duel ; Rofellos,
@@ -979,6 +1003,149 @@ Deux choix qui ne sont pas des détails :
 Le remplissage relâche ses contraintes dans un ordre fixe — d'abord la courbe,
 puis les quotas de type — parce qu'un deck de 99 cartes vaut mieux qu'un deck
 de 84 parfaitement galbé.
+
+### Partir d'une stratégie plutôt que d'un commandant
+
+On arrive sur cette page de deux façons : avec un commandant en tête, ou avec
+une envie de stratégie (« je veux monter du superfriends »). D'où une étape 2
+**facultative et explicitement sautable** — elle ne se charge même pas tant
+qu'on ne la demande pas, ce qui évite de payer sa requête à chaque visite.
+
+Les deux chemins lisent **la même mesure**, `themes_db.theme_scores` : une
+ligne par couple (commandant, archétype), avec le poids de consensus des 63
+meilleures cartes possédées. Seule change la colonne qu'on lit — le meilleur de
+chaque commandant, ou celui de l'archétype demandé. C'est ce qui garantit
+qu'aucun des deux classements ne peut dériver de l'autre ; les trier chacun de
+son côté aurait fini par donner deux vérités.
+
+Trois règles, et la deuxième est celle qui se paierait en silence :
+
+- **La liste des archétypes est bornée aux commandants possédés.** Elle dit
+  « ce que je peux monter », pas « ce qui existe en Commander » : proposer un
+  archétype qu'aucun commandant de la collection ne joue mènerait droit à un
+  écran vide. L'agrégat « toutes stratégies » en est exclu — ce n'est pas une
+  stratégie, et le prendre comme filtre reviendrait à ne rien filtrer.
+- **Demander un archétype bascule le classement dessus**, et écarte les
+  commandants qui ne le jouent pas. Garder l'ancien tri — chacun sur *son*
+  meilleur — aurait affiché un ordre qui ne répond pas à la question posée sans
+  que rien ne le signale : sur la collection, le commandant qui domine le
+  classement général n'est presque jamais le meilleur d'un archétype donné.
+  C'est l'erreur silencieuse que fige `tests/test_competitive_archetypes.py`,
+  lequel n'a pas besoin de base — le croisement est fait en Python, à partir de
+  deux lectures que le routeur ne fait qu'une fois.
+- **Le meilleur archétype du commandant reste affiché** quand il diffère de
+  celui qu'on a demandé (« monte mieux Infect »). C'est une information, pas une
+  correction : la stratégie choisie reste celle qui construit.
+
+Une fois le commandant choisi, le deck est construit **directement** avec
+l'archétype de l'étape 2 — le redemander n'apprendrait rien. La liste des
+archétypes du commandant reste affichée dessous pour en changer, et elle montre
+alors ce que ce commandant-là sait faire d'autre.
+
+## Le catalogue des archétypes (`/archetypes`)
+
+**La seule page du projet qui parle de ce qu'on ne possède pas.** Toutes les
+autres partent de la collection : quel deck monter avec elle, comment
+l'équilibrer, que lui acheter. Celle-ci part du format — « qu'est-ce que le
+superfriends, qui le pilote, et qu'est-ce que ça me coûterait » — parce qu'une
+page de découverte bornée à la collection ne ferait rien découvrir.
+
+La source est la **deuxième famille d'endpoints EDHREC** : `/pages/tags/themes.json`
+recense les archétypes, `/pages/tags/<slug>.json` donne pour chacun ses
+commandants et ses cartes. Elle est sitemapée (`/sitemaps/tags.xml`) donc
+voulue, au même titre que les pages commandants. Trois tables reconstructibles
+(migration 020) : `archetypes`, `archetype_cards`, `archetype_commanders`.
+
+**Deux entrées peuvent viser la même carte.** EDHREC référence ses
+commandants par impression (`scryfall_id`) : deux d'entre elles peuvent
+retomber sur le même `oracle_id`. Un `ON CONFLICT DO UPDATE` touchait alors
+deux fois la même ligne dans une seule commande, Postgres refusait
+(`CardinalityViolation`) et **toute la synchronisation s'arrêtait** — pas
+seulement l'archétype fautif. Constaté au vingtième archétype du catalogue
+réel, donc invisible sur un essai à cinq. Le `DISTINCT ON` garde l'impression
+la plus jouée ; un test le fige.
+
+**Le slug est dans l'`url`, jamais dans le champ `slug`** — celui-ci porte la
+carte qui illustre la vignette (« skullclamp » pour Tokens). Se tromper de
+champ demande une page qui n'existe pas, et le bucket S3 d'EDHREC répond alors
+**403 et non 404**, faute de droit de listage : l'erreur ne se lit même pas
+comme une page absente. Un test fige la règle.
+
+**Plancher à 500 decks** (`MIN_ARCHETYPE_DECKS`) : 183 archétypes retenus sur
+les 270 recensés — mesuré : **4 min 37 s**, 56 964 cartes, 4 324 commandants,
+ce qui range d'office cette synchronisation du côté SSH. La queue, ce sont « planechase » ou « dandan » à cinq decks,
+dont le taux d'inclusion serait calculé sur une poignée de listes. Le plancher
+est plus haut que celui des thèmes par commandant (50) parce que l'assiette
+n'est pas la même — le format entier contre les decks d'un seul commandant.
+
+### Ce qui est écrit à la main, et pourquoi c'est assumé
+
+**EDHREC ne publie aucune description.** Le champ existe dans leur JSON, il est
+vide — sur les pages archétypes comme sur les pages commandants. « Ce que fait
+un deck aristocrats » n'est ni un compte ni un taux : rien dans le projet ne
+peut le calculer, et le faire produire par un modèle de langage reviendrait à
+inventer ce qu'on refuse d'inventer partout ailleurs (c'est l'argument du stax
+dans le bracket).
+
+D'où `services/archetype_notes.py` : quarante archétypes décrits à la main, en
+trois champs — le principe, comment ça gagne, ce qui lui tombe dessus. La règle
+de lecture est affichée sur la page : **les textes sont d'un joueur, les
+chiffres sont mesurés**, et aucun nombre n'entre dans ces notes. Les écrire
+deux fois les ferait diverger de ce qui les calcule.
+
+Les autres archétypes affichent leurs chiffres sans note plutôt que de faire
+semblant d'avoir un avis. `aliases` sert la recherche, exactement comme dans
+`land_cycles` : EDHREC range le superfriends sous « Planeswalkers », et un
+joueur francophone tape « jetons » ou « défausse ».
+
+### « Est-ce que je peux le monter » n'a pas de réponse au niveau de l'archétype
+
+Le coût est une propriété **du commandant**, pas de la stratégie : le même
+archétype derrière un commandant qu'on possède et derrière un autre à 40 €
+qu'on n'a pas ne sont pas la même dépense. La page chiffre donc chacun des
+seize premiers commandants, et trois règles portent ce calcul :
+
+- **L'identité de couleur borne le noyau.** Les 63 meilleures cartes d'un
+  archétype sont réparties sur les cinq couleurs : sans le `<@`, on annoncerait
+  un prix pour un deck impossible à jouer. Conséquence visible à l'écran : un
+  commandant mono-couleur affiche « noyau 9/51 » — c'est l'archétype qui n'a pas
+  assez de cartes dans ces couleurs, **pas la collection qui manque**, et
+  l'interface le dit.
+- **Le commandant n'occupe pas un des 63 créneaux** (il est dans la zone de
+  commandement) mais son propre prix est affiché à côté quand il n'est pas
+  possédé — c'est souvent le plus gros achat de la liste.
+- **Le total est doublé d'un compte au-dessus du plafond de prix.** « 320 € »
+  ne se décide pas pareil selon qu'il s'agit de soixante cartes à cinq euros ou
+  de trois pièces à cent, et c'est exactement la question « gros investissement
+  ou non ». Les cartes sans prix sont comptées à part, jamais ajoutées pour
+  zéro.
+
+**Le catalogue au niveau de la liste n'affiche aucun taux de couverture**, et
+c'est délibéré : « j'ai 40 des 63 meilleures cartes du tokens » mélangerait les
+cinq couleurs et ne dirait rien de constructible. Le seul chiffre honnête à ce
+niveau est le nombre de commandants de l'archétype **qu'on possède**.
+
+### Le lien vers `/competitive`, et le piège qu'il révèle
+
+L'article renvoie vers `/competitive?archetype=<slug>&format=<format>` : les
+deux pages partagent le **même espace de slugs** (EDHREC nomme « infect » ou
+« planeswalkers » des deux côtés), donc la stratégie choisie ici arrive
+présélectionnée là-bas.
+
+Mais les deux tables ne recensent pas la même chose, et l'écran doit le dire :
+`commander_themes` ne contient que les **huit archétypes les plus joués de
+chaque commandant possédé** (ce qu'EDHREC publie sur sa fiche, au-dessus de
+50 decks), tandis que `archetype_commanders` part du format entier. Un
+commandant qu'on possède peut donc figurer parmi les pilotes d'un archétype
+sans que cet archétype soit dans son top 8 — auquel cas `/competitive` ne sait
+pas le construire. Il l'écrit en clair plutôt que d'afficher une grille non
+filtrée comme si de rien n'était.
+
+**Les visuels ne sont rapatriés que pour les commandants et les trois sections
+de tête** (une trentaine), pas pour les trois cents cartes du catalogue : même
+règle que `/must-have`, au-delà de quelques dizaines d'images un rapatriement
+six par six ferait attendre une vingtaine de secondes pour des cartes qu'on ne
+regardera pas.
 
 ## Cartes à avoir (`/must-have`)
 
@@ -1453,7 +1620,7 @@ Deux points d'exploitation :
 
 **Déployé et planifié.** DB (`lxc-pg18`, 192.168.1.104), back (`lxc-mtg-back`,
 192.168.1.143) et front (`lxc-mtg-front`, 192.168.1.144), exposés en
-`mtg-edh-api.julien-cloud.eu` et `mtg-edh.julien-cloud.eu`. Les quatre
+`mtg-edh-api.julien-cloud.eu` et `mtg-edh.julien-cloud.eu`. Les cinq
 synchronisations sont ordonnancées par Kestra (`lxc-kestra`, 192.168.1.119).
 
 Rien n'est en chantier. Deux pistes ouvertes, aucune engagée :
