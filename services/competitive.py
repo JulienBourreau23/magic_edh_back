@@ -373,3 +373,133 @@ def build(commander: dict, theme_slug: str, format: str, max_price: float) -> di
         ],
         "pool_size": len(pool),
     }
+
+
+# --- Étapes 2 et 3 de la page : l'archétype, puis le commandant --------------
+#
+# Ces deux fonctions ne touchent pas la base : elles croisent les commandants
+# possédés (`db.commanders.owned_commanders`) et les scores par archétype
+# (`db.themes.theme_scores`), tous deux lus une seule fois par le routeur. Ce
+# qui les rend testables sans Postgres — et c'est voulu, parce que l'erreur
+# qu'elles peuvent commettre est silencieuse : un classement qui prétend suivre
+# l'archétype choisi tout en suivant un autre.
+
+
+def _theme_block(row: dict) -> dict:
+    """La forme sous laquelle un couple (commandant, archétype) part à l'écran."""
+    return {
+        "slug": row["theme_slug"],
+        "label": row["label"],
+        # Poids de consensus des 63 meilleures cartes possédées : c'est lui qui
+        # classe, d'où son affichage — un tri sur un nombre invisible est un
+        # tri qu'on ne peut pas contester.
+        "consensus": round(float(row["reachable"] or 0), 1),
+        "cards_usable": row["owned_cards"],
+        # Part de l'optimum de cet archétype-là. À lire ensemble : 99 % d'une
+        # référence molle vaut moins que 93 % d'une référence forte.
+        "score": round(float(row["score"] or 0), 3),
+        "deck_count": row["deck_count"],
+    }
+
+
+def _by_commander(scores: list[dict]) -> dict[str, dict[str, dict]]:
+    index: dict[str, dict[str, dict]] = {}
+    for row in scores:
+        index.setdefault(str(row["commander_oracle_id"]), {})[row["theme_slug"]] = row
+    return index
+
+
+def _best(themes: dict[str, dict]) -> dict | None:
+    """Le mieux servi par la collection, à égalité le plus joué."""
+    if not themes:
+        return None
+    return max(themes.values(),
+               key=lambda row: (float(row["reachable"] or 0), row["deck_count"] or 0))
+
+
+def rank_commanders(commanders: list[dict], scores: list[dict],
+                    theme_slug: str | None = None) -> list[dict]:
+    """
+    Les commandants possédés, classés par ce que la collection permet d'en tirer.
+
+    Sans archétype demandé, chacun est jugé sur **son** meilleur : c'est la
+    question « quel deck monter ce soir ». Avec un archétype, le classement
+    bascule sur celui-là et les commandants qui ne le jouent pas **sortent de
+    la liste** — les garder en les classant sur autre chose afficherait un
+    ordre qui ne répond pas à la question posée, sans que rien ne le dise.
+
+    `best_theme` reste renvoyé dans les deux cas : quand il diffère de
+    l'archétype demandé, l'écran peut signaler qu'un autre plan servirait mieux
+    ce commandant. C'est une information, pas une correction — l'archétype
+    choisi reste celui qui construit.
+    """
+    index = _by_commander(scores)
+    enriched = []
+    for commander in commanders:
+        themes = index.get(str(commander["oracle_id"]), {})
+        selected = themes.get(theme_slug) if theme_slug else None
+        if theme_slug and selected is None:
+            continue
+        best = _best(themes)
+        enriched.append({
+            **commander,
+            # Sans archétype connu (synchronisation EDHREC jamais lancée), le
+            # commandant reste affiché plutôt que de disparaître.
+            "best_theme": _theme_block(best) if best else None,
+            "selected_theme": _theme_block(selected) if selected else None,
+        })
+
+    def key(entry: dict) -> tuple:
+        block = entry["selected_theme"] if theme_slug else entry["best_theme"]
+        return (-(block["consensus"] if block else -1), entry["name"])
+
+    enriched.sort(key=key)
+    return enriched
+
+
+def archetypes(commanders: list[dict], scores: list[dict]) -> list[dict]:
+    """
+    Les archétypes que la collection peut monter, le plus abouti d'abord.
+
+    C'est l'étape facultative qui permet de partir d'une stratégie plutôt que
+    d'un commandant. La liste est donc bornée aux **commandants possédés** :
+    proposer un archétype qu'aucun d'eux ne joue mènerait à un écran vide.
+
+    L'agrégat « toutes stratégies » n'y figure pas — ce n'est pas une
+    stratégie, et le choisir comme filtre reviendrait à ne rien filtrer.
+
+    Chaque ligne porte le meilleur commandant de l'archétype, parce que c'est
+    lui qui décide de ce qu'on peut vraiment monter : un archétype joué par
+    quinze commandants dont aucun n'a ses cartes ne vaut pas celui qu'un seul
+    commandant sert bien. `deck_count` est la somme des decks recensés par
+    EDHREC **chez tes commandants**, pas la popularité de l'archétype dans le
+    format — la nuance est écrite à l'écran.
+    """
+    owned = {str(commander["oracle_id"]): commander for commander in commanders}
+    grouped: dict[str, list[dict]] = {}
+    for row in scores:
+        if row["theme_slug"] == themes_db.ALL_THEMES_SLUG:
+            continue
+        if str(row["commander_oracle_id"]) in owned:
+            grouped.setdefault(row["theme_slug"], []).append(row)
+
+    listed = []
+    for slug, rows in grouped.items():
+        best = max(rows, key=lambda row: float(row["reachable"] or 0))
+        commander = owned[str(best["commander_oracle_id"])]
+        listed.append({
+            "slug": slug,
+            "label": best["label"],
+            "commanders": len(rows),
+            "deck_count": sum(row["deck_count"] or 0 for row in rows),
+            "best": {
+                "oracle_id": str(commander["oracle_id"]),
+                "name": commander["name"],
+                "name_fr": commander.get("name_fr"),
+                **_theme_block(best),
+            },
+        })
+
+    listed.sort(key=lambda entry: (-entry["best"]["consensus"], -entry["deck_count"],
+                                   entry["label"]))
+    return listed

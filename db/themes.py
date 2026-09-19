@@ -159,10 +159,10 @@ def build_pool(commander_oracle_id: str, theme_slug: str, format: str,
 NONLAND_SLOTS = 63
 
 
-def best_theme_by_commander(format: str) -> dict[str, dict]:
+def theme_scores(format: str) -> list[dict]:
     """
-    Pour chaque commandant possédé, l'archétype qu'on peut monter le plus près
-    de la référence **avec la collection**.
+    Une ligne par couple (commandant, archétype) : ce que la collection permet
+    d'en monter.
 
     Le score n'est pas un taux de recouvrement (« combien de cartes de la liste
     j'ai »), qui a deux défauts : il compare des ratios alors que ce qui compte
@@ -175,14 +175,20 @@ def best_theme_by_commander(format: str) -> dict[str, dict]:
     meilleures, possédées ou non), chacun mesuré par la somme des taux
     d'inclusion de ses cartes.
 
-    Le classement se fait sur la valeur **absolue** du premier, pas sur le
+    Ce qui classe est la valeur **absolue** du premier (`reachable`), pas le
     rapport des deux. Le rapport est trompeur pour choisir : l'agrégat « toutes
     stratégies » a une référence plus molle qu'un archétype marqué — ses cartes
     sont jouées dans moins de decks chacune — donc on l'approche plus
     facilement. Sur Atraxa, la collection atteint 99 % de l'agrégat et 93 % de
     l'infect, alors que le deck infect porte bien plus de consensus (29,7
-    contre 22,2). Le rapport reste renvoyé, pour dire à quel point on est loin
-    de l'optimum de cet archétype-là.
+    contre 22,2). Le rapport (`score`) reste renvoyé, pour dire à quel point on
+    est loin de l'optimum de cet archétype-là.
+
+    **Tous les couples sont renvoyés, pas seulement le meilleur de chaque
+    commandant** : c'est la même mesure qui répond aux deux questions de la
+    page — « quel commandant monter » (le meilleur de chacun) et « qui monte
+    cet archétype-là » (une colonne de la même table). Les trier ici et là
+    ferait diverger deux classements qui doivent rester le même.
 
     Une seule requête pour tous les commandants : la page en affiche une
     trentaine, et trente allers-retours pour trier une grille seraient absurdes.
@@ -231,30 +237,20 @@ def best_theme_by_commander(format: str) -> dict[str, dict]:
                           FROM cartes WHERE owned) c
                     WHERE rang <= %(slots)s
                     GROUP BY 1, 2
-                ),
-                classe AS (
-                    SELECT reference.commander_oracle_id, reference.theme_slug,
-                           th.label, th.deck_count,
-                           COALESCE(possede.owned_cards, 0) AS owned_cards,
-                           COALESCE(possede.reachable, 0) / NULLIF(reference.ideal, 0) AS score,
-                           COALESCE(possede.reachable, 0) AS reachable,
-                           row_number() OVER (
-                               PARTITION BY reference.commander_oracle_id
-                               ORDER BY COALESCE(possede.reachable, 0) DESC NULLS LAST,
-                                        th.deck_count DESC NULLS LAST
-                           ) AS rang
-                    FROM reference
-                    LEFT JOIN possede
-                           ON possede.commander_oracle_id = reference.commander_oracle_id
-                          AND possede.theme_slug = reference.theme_slug
-                    JOIN commander_themes th
-                      ON th.commander_oracle_id = reference.commander_oracle_id
-                     AND th.slug = reference.theme_slug
                 )
-                SELECT commander_oracle_id, theme_slug, label, deck_count,
-                       owned_cards, score, reachable
-                FROM classe WHERE rang = 1
+                SELECT reference.commander_oracle_id, reference.theme_slug,
+                       th.label, th.deck_count,
+                       COALESCE(possede.owned_cards, 0) AS owned_cards,
+                       COALESCE(possede.reachable, 0) / NULLIF(reference.ideal, 0) AS score,
+                       COALESCE(possede.reachable, 0) AS reachable
+                FROM reference
+                LEFT JOIN possede
+                       ON possede.commander_oracle_id = reference.commander_oracle_id
+                      AND possede.theme_slug = reference.theme_slug
+                JOIN commander_themes th
+                  ON th.commander_oracle_id = reference.commander_oracle_id
+                 AND th.slug = reference.theme_slug
                 """,
                 {"all_slug": ALL_THEMES_SLUG, "slots": NONLAND_SLOTS},
             )
-            return {str(row["commander_oracle_id"]): dict(row) for row in cur.fetchall()}
+            return cur.fetchall()

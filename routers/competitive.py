@@ -1,9 +1,15 @@
 """
 routers/competitive.py — construction d'un deck compétitif, par étapes.
 
-Une étape par appel, dans l'ordre où l'interface les pose : le commandant, le
-format, l'archétype, puis le deck. Chaque étape ne dépend que des précédentes,
-ce qui permet de revenir en arrière sans rien reconstruire.
+Une étape par appel, dans l'ordre où l'interface les pose : le format,
+l'archétype (facultatif), le commandant, l'archétype à nouveau si on ne l'a pas
+choisi, puis le deck. Chaque étape ne dépend que des précédentes, ce qui permet
+de revenir en arrière sans rien reconstruire.
+
+L'archétype peut donc se choisir **avant ou après** le commandant, et c'est
+délibéré : on arrive sur cette page soit avec un commandant en tête, soit avec
+une stratégie. Dans les deux cas la mesure est la même (`themes_db.theme_scores`),
+seule change la colonne qu'on lit.
 """
 from uuid import UUID
 
@@ -34,10 +40,28 @@ def _commander(oracle_id: UUID) -> dict:
     return card
 
 
-@router.get("/commanders")
-def list_commanders(format: str = Query(default="commander", pattern="^(commander|duel)$")):
+@router.get("/archetypes")
+def list_archetypes(format: str = Query(default="commander", pattern="^(commander|duel)$")):
     """
-    Étape 1 : les commandants de la collection, **classés par ce qu'on peut en
+    Étape 2, **facultative** : partir d'une stratégie plutôt que d'un commandant.
+
+    On peut la sauter — c'est le chemin d'origine, et rien n'oblige à savoir ce
+    qu'on veut jouer avant d'avoir vu ce qu'on peut monter. Elle sert au cas
+    inverse : « je veux monter du superfriends, qui ai-je pour ça ».
+
+    La liste ne contient que des archétypes montables avec la collection : ce
+    sont ceux des commandants possédés, les seuls dont on sache ce qu'ils
+    coûteraient.
+    """
+    commanders = commanders_db.owned_commanders(format)
+    return {"archetypes": competitive.archetypes(commanders, themes_db.theme_scores(format))}
+
+
+@router.get("/commanders")
+def list_commanders(format: str = Query(default="commander", pattern="^(commander|duel)$"),
+                    theme: str | None = Query(default=None)):
+    """
+    Étape 3 : les commandants de la collection, **classés par ce qu'on peut en
     tirer tout de suite**, avec l'archétype qui donne ce résultat.
 
     Le critère n'est pas « combien de cartes de la liste j'ai » : une pièce
@@ -49,50 +73,28 @@ def list_commanders(format: str = Query(default="commander", pattern="^(commande
     on ne possède aucune pièce n'aidera pas ce soir. Le nombre de decks
     recensés est montré à côté pour que le choix reste éclairé.
 
-    La couverture est calculée sur la banlist multijoueur, la plus large : le
-    format n'est choisi qu'à l'étape suivante, et la banlist Duel retire les
-    mêmes quelques dizaines de cartes à tout le monde — elle ne change pas
-    l'ordre.
+    `theme` restreint la liste aux commandants qui jouent cet archétype **et
+    bascule le classement dessus**. Les deux vont ensemble : classer sur le
+    meilleur archétype de chacun après avoir demandé une stratégie précise
+    donnerait un ordre qui ne répond pas à la question, sans rien dire.
     """
     commanders = commanders_db.owned_commanders(format)
-    best = themes_db.best_theme_by_commander(format)
-
-    enriched = []
-    for commander in commanders:
-        theme = best.get(str(commander["oracle_id"]))
-        enriched.append({
-            **commander,
-            "best_theme": {
-                "slug": theme["theme_slug"],
-                "label": theme["label"],
-                # Poids de consensus des 63 meilleures cartes possédées : c'est
-                # lui qui classe, d'où son affichage — un tri sur un nombre
-                # invisible est un tri qu'on ne peut pas contester.
-                "consensus": round(float(theme["reachable"] or 0), 1),
-                "cards_usable": theme["owned_cards"],
-                # Part de l'optimum de cet archétype-là. À lire ensemble : 99 %
-                # d'une référence molle vaut moins que 93 % d'une référence forte.
-                "score": round(float(theme["score"] or 0), 3),
-                "deck_count": theme["deck_count"],
-            } if theme else None,
-        })
-
-    # Sans archétype connu (synchronisation EDHREC jamais lancée), le
-    # commandant passe en fin de liste plutôt que de disparaître.
-    enriched.sort(key=lambda entry: (
-        -(entry["best_theme"]["consensus"] if entry["best_theme"] else -1),
-        entry["name"],
-    ))
+    scores = themes_db.theme_scores(format)
+    enriched = competitive.rank_commanders(commanders, scores, theme)
     card_images.ensure_images(enriched)
-    return {"commanders": enriched}
+    return {"commanders": enriched, "theme": theme}
 
 
 @router.get("/themes")
 def list_themes(commander: UUID, format: str = Query(default="commander")):
     """
-    Étape 3 : les archétypes du commandant, classés par ce qu'en couvre la
+    Étape 4 : les archétypes du commandant, classés par ce qu'en couvre la
     collection — « celui que je peux monter » avant « celui qui est le plus
     joué ».
+
+    Reste appelée même quand l'archétype a été choisi à l'étape 2 : la liste
+    dit alors ce que *cet* commandant sait faire d'autre, et permet d'en
+    changer sans repartir de zéro.
     """
     _check_format(format)
     oracle_id = str(commander)
@@ -121,7 +123,7 @@ def list_themes(commander: UUID, format: str = Query(default="commander")):
 @router.get("/build")
 def build(commander: UUID, theme: str, format: str = Query(default="commander"),
           max_price: float = Query(default=DEFAULT_MAX_PRICE_EUR, gt=0)):
-    """Étape 4 : le deck, bâti sur la collection, achats proposés à côté."""
+    """Étape 5 : le deck, bâti sur la collection, achats proposés à côté."""
     _check_format(format)
     result = competitive.build(_commander(commander), theme, format, max_price)
     if "error" in result:
