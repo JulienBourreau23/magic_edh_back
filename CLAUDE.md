@@ -547,6 +547,27 @@ lib/decklist.ts             # découpage d'une decklist en sections de types
 > La même famille de règles refuse aussi de réassigner une variable pendant le
 > rendu : pas d'accumulateur muté dans un `.map()`.
 
+## La navigation, rangée par question posée
+
+Dix-sept liens alignés à plat tenaient sur **trois rangées** où rien ne se
+distinguait : « Terrains budget » voisinait « Qui gagne » sans qu'on sache
+lequel parlait de la collection et lequel d'un deck. `TopNav` les range en cinq
+menus (`radix-ui` `DropdownMenu`), sur une seule rangée :
+
+**Collection** (ce que je possède) · **Decks** (ce que je joue) · **Que monter**
+(ce que je pourrais monter) · **Mesurer** (ce que ça vaut) · **Le format** (ce
+qui s'impose à moi).
+
+Deux détails qui ne sont pas cosmétiques :
+
+- **chaque entrée porte une phrase courte.** La moitié de ces pages ont un nom
+  qui ne dit pas ce qu'elles font — « Équilibrer », « Qui gagne », « Cartes à
+  avoir » — et l'infobulle d'un lien ne se lit jamais ;
+- **le lien courant est le plus long qui corresponde**, pas le premier trouvé.
+  `/decks/import` commence par `/decks` : sans cette règle, importer une
+  decklist surlignerait « Mes decks ». Une fiche de deck (`/decks/42`) retombe
+  bien sur « Mes decks », et `/archetypes/tokens` sur « Archétypes ».
+
 ## Thème et graphiques
 
 Le thème est piloté par `next-themes` en **mode classe** (`globals.css` déclare
