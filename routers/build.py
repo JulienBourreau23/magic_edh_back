@@ -76,14 +76,7 @@ def lands(payload: LandRequest):
     # Les terrains de base ne sont pas dans la collection (quantité illimitée) :
     # le conseil les nomme, on rend ici l'impression qui va avec, sans quoi le
     # navigateur ne pourrait pas les poser dans le brouillon.
-    resolved = cards_db.resolve_names(list(plan["basics"]))
-    # `name` est déjà le nom français (c'est par lui que le conseil les nomme) :
-    # on le garde en alias, la résolution ne renvoyant que les colonnes de
-    # `cards_cheapest`, donc l'anglais.
-    plan["basics_cards"] = [
-        {**resolved[name.lower()], "name_fr": name, "quantity": quantity}
-        for name, quantity in plan["basics"].items() if name.lower() in resolved
-    ]
+    plan["basics_cards"] = cards_db.basic_land_printings(plan["basics"])
     return plan
 
 

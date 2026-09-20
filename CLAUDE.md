@@ -1669,13 +1669,19 @@ comme une créature).
 ### Trois PDF pour trois usages (`lib/deck-pdf.ts`)
 
 Générés côté navigateur comme la liste d'achats, par un seul composant
-(`components/DeckExport.tsx`) branché sur les **trois écrans qui montrent une
-decklist** : la fiche de deck, le deck compétitif et l'idée de deck. Ce ne sont
-pas trois habillages du même document : chacun répond à une question que les
-deux autres ne posent pas.
+(`components/DeckExport.tsx`) branché sur les **quatre écrans qui montrent une
+decklist** : la fiche de deck, l'atelier, le deck compétitif et l'idée de deck.
+Ce ne sont pas trois habillages du même document : chacun répond à une question
+que les deux autres ne posent pas.
 
-- **Liste par type** — le deck rangé par sections, deux colonnes, une page
-  pour cent cartes. Ce qu'on garde avec la boîte.
+- **Fiche du deck** — le deck rangé par sections, deux colonnes, une page pour
+  cent cartes, **suivi de ce que le site dit du deck** : courbe de mana,
+  bracket et ce qui en fixe le plancher, manabase couleur par couleur avec
+  l'échange de basiques conseillé, équilibre des rôles, alertes de légalité,
+  combos avec leurs étapes, meilleures synergies. C'est ce qu'on garde avec la
+  boîte, et une liste seule ne rappelle pas pourquoi le deck est ce qu'il est.
+  Un écran sans analyse à donner exporte la liste seule, sous son ancien nom
+  (« liste par type »).
 - **Visuels** — cinq cartes par ligne, vingt-cinq par page. À 33 mm de large
   l'illustration reste reconnaissable, ce qui est tout son rôle ici, le nom
   étant en légende. Quatre colonnes donnaient sept pages pour un deck.
@@ -1685,7 +1691,58 @@ deux autres ne posent pas.
 - **Feuille de tournoi** — **tout** est listé, quantité et nom seulement, par
   ordre alphabétique et en trois colonnes équilibrées, le commandant marqué
   d'un astérisque. Rien d'autre : c'est ce qu'un arbitre vérifie, le prix et le
-  type l'encombreraient.
+  type l'encombreraient. **Elle n'a jamais d'analyse**, même quand l'écran en a
+  une — c'est le seul de ces documents qu'on remet à quelqu'un d'autre.
+
+Les visuels gardent le bandeau de tête mais **pas** l'analyse : c'est une
+planche, et l'imprimer une seconde fois ne l'expliquerait pas mieux.
+
+#### D'où viennent les chiffres de la fiche
+
+`lib/deck-sheet.ts` ne calcule **rien** : il met en page ce que l'écran affiche
+déjà (`deckAnalysis()` adapte indifféremment un `DeckDetail` et un
+`BuildEvaluation`, qui sortent du même calcul côté serveur). Un PDF qui
+compterait de son côté finirait par contredire la fiche, et c'est le genre
+d'écart qu'on ne voit qu'une fois le deck monté.
+
+L'analyse arrive au composant de deux façons, et la distinction se paierait :
+
+- **`analysis`** quand l'écran l'a déjà — la fiche de deck ;
+- **`loadAnalysis`**, appelé **au clic**, quand elle se calcule : l'atelier,
+  dont le brouillon a pu changer depuis le dernier « Évaluer », et le deck
+  compétitif, qui n'est pas enregistré. La payer au chargement de ces pages
+  serait payer une évaluation profonde que personne n'a demandée ; la lire dans
+  un état déjà affiché la rendrait périmée dès la carte suivante. Une analyse
+  qui échoue n'emporte pas la decklist : le PDF sort sans elle et l'écran le
+  dit.
+
+Deux conséquences qui ne se devinent pas :
+
+- **Le deck compétitif se fait évaluer comme un brouillon d'atelier**
+  (`/build/evaluate`), ce qui a obligé `/competitive/build` à rendre ses
+  terrains de base **avec leur impression** (`basics_cards`, comme
+  `/build/lands`) : cet endpoint ne connaît que des `scryfall_id`, et des
+  basiques réduits à leur nom auraient disparu du brouillon — manabase jugée
+  sur douze terrains au lieu de trente-six, sans qu'aucune alerte ne le
+  signale. Un test le fige. Ses **synergies et ses combos restent ceux de
+  l'écran**, mesurés contre l'archétype et non contre tous les decks du
+  commandant.
+- **`/deck-ideas/[id]` n'a ni bracket ni manabase** : son noyau est
+  non-terrain, rien de tout cela ne s'y calcule. Sa fiche porte les combos, les
+  synergies et une phrase qui dit précisément ce qui manque, plutôt que des
+  sections vides.
+
+Trois contraintes de mise en page, toutes constatées à l'impression
+(`lib/pdf-page.ts`) :
+
+- **jsPDF ne connaît que des coordonnées** : chaque bloc réserve sa hauteur
+  avant d'écrire (`PageFlow.need`), sinon un saut de page oublié écrit
+  par-dessus le bas de page — invisible tant qu'on ne regarde pas le PDF.
+- **Un en-tête de tableau ne part jamais seul** : il est écrit avec la place de
+  sa première ligne et réécrit en haut de la page suivante.
+- **La police par défaut (Helvetica, WinAnsi) n'a pas de flèche.** « 11 → 13 »
+  s'imprimait en deux caractères parasites ; l'échange de basiques s'écrit donc
+  « de 11 à 13 ». Même vigilance pour tout caractère hors cp1252.
 
 **Toutes les listes ne valent pas une feuille de tournoi**, d'où le paramètre
 `modes` : `/deck-ideas/[id]` n'en propose pas. Cette liste est un brouillon de

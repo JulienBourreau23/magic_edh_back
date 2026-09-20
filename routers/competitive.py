@@ -132,4 +132,10 @@ def build(commander: UUID, theme: str, format: str = Query(default="commander"),
     card_images.ensure_images(result["cards"])
     card_images.ensure_images(result["lands"]["nonbasic"])
     card_images.ensure_images([item["buy"] for item in result["upgrades"]])
+
+    # Les basiques avec leur impression, comme `/build/lands`. Le deck n'est pas
+    # enregistré : sans identifiant, la fiche PDF ne pourrait pas le faire
+    # évaluer par `/build/evaluate`, et sa manabase serait jugée sur les seuls
+    # terrains non-basiques — treize au lieu de trente-six.
+    result["lands"]["basics_cards"] = cards_db.basic_land_printings(result["lands"]["basics"])
     return result

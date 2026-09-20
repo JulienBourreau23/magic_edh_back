@@ -162,6 +162,29 @@ def resolve_names(names: list[str]) -> dict[str, dict]:
     return resolved
 
 
+def basic_land_printings(basics: dict[str, int]) -> list[dict]:
+    """
+    Les impressions des terrains de base d'un conseil de manabase.
+
+    Les basiques ne sont pas dans la collection — quantité supposée illimitée —
+    donc les calculs ne les rendent que par leur **nom** et leur compte. Or un
+    nom ne se pose pas dans un brouillon et ne s'évalue pas : l'atelier comme
+    l'export de fiche ont besoin d'une impression pour relire la carte dans le
+    catalogue.
+
+    Un nom non résolu est simplement absent, comme partout avec
+    `resolve_names` : une manabase amputée se voit au compte de terrains, alors
+    qu'une ligne inventée passerait inaperçue.
+
+    `name_fr` est réaffirmé depuis la clé parce que c'est par lui que le
+    conseil nomme le terrain ; la résolution, elle, ne rend que les colonnes de
+    `cards_cheapest`, donc l'anglais.
+    """
+    resolved = resolve_names(list(basics))
+    return [{**resolved[name.lower()], "name_fr": name, "quantity": quantity}
+            for name, quantity in basics.items() if name.lower() in resolved]
+
+
 def get_cheapest_by_oracle_id(oracle_id: str) -> dict | None:
     """L'impression la moins chère d'une carte, nom français compris. Sert aux
     écrans qui raisonnent par carte et non par impression (commandant choisi,

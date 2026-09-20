@@ -8,6 +8,7 @@ de Postgres et se sautent proprement sans lui.
 """
 import pytest
 
+import db.cards as cards_db
 import db.themes as themes_db
 from db.core import get_conn
 
@@ -175,3 +176,25 @@ def test_un_commandant_banni_a_ce_titre_sort_de_la_liste_duel():
             )
             fautifs = [r["name"] for r in cur.fetchall()]
     assert fautifs == [], fautifs
+
+
+def test_les_basiques_du_deck_competitif_portent_une_impression():
+    """
+    Le deck compétitif n'est pas enregistré : sa fiche PDF le fait évaluer par
+    `/build/evaluate`, qui ne connaît que des `scryfall_id`. Les basiques
+    n'arrivant du calcul que par leur **nom**, un nom non résolu les ferait
+    disparaître du brouillon évalué — et la manabase serait jugée sur les seuls
+    terrains non-basiques, soit une douzaine au lieu de trente-six.
+
+    Rien ne le signalerait : le PDF annoncerait simplement un deck qui ne peut
+    pas lancer ses sorts. D'où ce test, qui vérifie que **tous** les
+    exemplaires conseillés reviennent avec une impression.
+    """
+    basics = {"Ile": 11, "Montagne": 8, "Plaine": 17}
+    printings = cards_db.basic_land_printings(basics)
+
+    assert {row["name_fr"] for row in printings} == set(basics), (
+        "un terrain de base n'a pas été résolu : la manabase évaluée serait amputée"
+    )
+    assert sum(row["quantity"] for row in printings) == sum(basics.values())
+    assert all(row["scryfall_id"] for row in printings)
