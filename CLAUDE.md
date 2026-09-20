@@ -1521,6 +1521,31 @@ Quatre appuis, tous réutilisés plutôt que réécrits :
 **Changer de commandant vide le brouillon** : l'identité de couleur change, et
 garder des cartes devenues illégales serait un piège silencieux.
 
+**L'illustration au survol** (`components/CardHoverPreview.tsx`) répond à
+« qu'est-ce que je suis en train de poser » : les deux listes de la page — le
+vivier et le deck — ne montrent que des noms, et on construit avec une
+collection qu'on ne connaît pas par cœur. Elle est posée sur les deux, parce
+qu'on retire une carte par erreur aussi facilement qu'on en ajoute une.
+
+Trois choix qui ne se devinent pas :
+
+- **L'aperçu ne suit pas la souris.** Il se pose là où le curseur est entré
+  dans la ligne et n'y bouge plus : suivre le pointeur obligerait à réagir à
+  chaque `mousemove`, donc à re-rendre une page de deux cents lignes en
+  continu, pour un confort qui n'en est pas un — une image qui glisse sous
+  l'œil se lit moins bien qu'une image posée.
+- **120 ms avant d'afficher, et avant d'effacer.** Sans ce délai, descendre la
+  liste déclencherait deux cents téléchargements d'illustration pour des lignes
+  qu'on n'a fait que traverser ; au retrait, il évite le clignotement d'une
+  ligne à sa voisine.
+- **Le clavier est servi comme la souris** : les lignes sont des boutons, donc
+  elles se reçoivent au `Tab`, et l'aperçu se place alors contre le bord droit
+  de la ligne — il n'y a pas de curseur d'où partir.
+
+Le rendu passe par un portail vers `document.body` : une liste à
+`overflow-y-auto` ne clippe pas un élément `fixed`, mais un ancêtre à
+`transform` le ferait, et cela ne se verrait qu'une fois la carte survolée.
+
 ### Archiver plutôt que supprimer
 
 `decks.archived_at` (migration 018) — une date et non un booléen : « quand
