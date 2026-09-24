@@ -1,4 +1,5 @@
 """db/cards.py — lecture de la table `cards` / vue matérialisée `cards_cheapest`."""
+import db.duel_meta as duel_meta
 from db.core import get_conn
 
 # Le nom de colonne est interpolé dans le SQL : il doit venir de cette table de
@@ -10,6 +11,17 @@ LEGALITY_COLUMNS = {"commander": "legal_commander", "duel": "legal_duel"}
 # par prix, sans quoi « le moins cher » ferait remonter des cartes à 5 centimes
 # que personne ne joue.
 MAX_EDHREC_RANK = 2000
+# Le même plancher en duel, mesuré dans le bon format : une carte vue dans
+# moins de decks du méta MTGTop8 n'y est pas jouée. Le rang EDHREC dirait ce
+# qui se joue en multijoueur, et laisserait passer la pioche de groupe comme il
+# écarterait l'interaction de niche qui gagne en face à face.
+#
+# Deux conditions, parce qu'aucune ne suffit seule : un compte absolu devient
+# laxiste à mesure que le méta grossit (cinq decks sur quatre mille, c'est du
+# bruit), et un taux seul croirait une carte vue une fois sur les deux seuls
+# decks qui pouvaient la jouer.
+MIN_DUEL_DECKS = 5
+MIN_DUEL_RATE = 0.02
 
 
 def resolve_names(names: list[str]) -> dict[str, dict]:
@@ -327,9 +339,20 @@ def find_candidates(color_identity: set[str], category: str, exclude_oracle_ids:
     Le classement suit la consigne « le moins d'achat possible » : gratuit
     d'abord, puis le moins cher. Le rang EDHREC ne sert pas de tri principal
     mais de filtre de qualité en amont (`MAX_EDHREC_RANK`), pour que « le moins
-    cher » reste « le moins cher parmi les cartes réellement jouées ».
+    cher » reste « le moins cher parmi les cartes réellement jouées ». En duel,
+    ce filtre est pris dans les tops de duel (`MIN_DUEL_DECKS`).
     """
     legality_column = LEGALITY_COLUMNS[format]
+    # En duel, le filtre de qualité et le départage suivent les tops de duel
+    # dès qu'ils sont synchronisés ; sans eux, EDHREC reste le repli.
+    if format == "duel" and duel_meta.available():
+        duel_join = "JOIN duel_card_stats ds ON ds.oracle_id = c.oracle_id"
+        quality = "ds.decks >= %(min_duel_decks)s AND ds.rate >= %(min_duel_rate)s"
+        popularity = "ds.share DESC"
+    else:
+        duel_join = ""
+        quality = "c.edhrec_rank IS NOT NULL AND c.edhrec_rank <= %(max_rank)s"
+        popularity = "c.edhrec_rank"
     with get_conn() as conn:
         with conn.cursor() as cur:
             cur.execute(
@@ -349,17 +372,18 @@ def find_candidates(color_identity: set[str], category: str, exclude_oracle_ids:
                 LEFT JOIN collection col ON col.oracle_id = c.oracle_id
                 LEFT JOIN wishlist w ON w.oracle_id = c.oracle_id
                 LEFT JOIN card_names_fr fr ON fr.oracle_id = c.oracle_id
+                {duel_join}
                 WHERE c.{legality_column}
                   AND c.color_identity <@ %(identity)s::text[]
                   AND c.categories @> ARRAY[%(category)s]
                   AND NOT (c.oracle_id = ANY(%(exclude)s::uuid[]))
-                  AND c.edhrec_rank IS NOT NULL AND c.edhrec_rank <= %(max_rank)s
+                  AND {quality}
                   AND (NOT %(exclude_gc)s OR NOT c.game_changer)
                   AND (col.quantity IS NOT NULL
                        OR (c.price_eur IS NOT NULL AND c.price_eur <= %(max_price)s))
                 ORDER BY free_to_use DESC,
                          CASE WHEN col.quantity IS NOT NULL THEN 0 ELSE c.price_eur END ASC,
-                         c.edhrec_rank
+                         {popularity}
                 LIMIT %(limit)s
                 """,
                 {
@@ -370,6 +394,8 @@ def find_candidates(color_identity: set[str], category: str, exclude_oracle_ids:
                     "exhausted": exhausted_oracle_ids or [],
                     "exclude_gc": exclude_game_changers,
                     "max_rank": MAX_EDHREC_RANK,
+                    "min_duel_decks": MIN_DUEL_DECKS,
+                    "min_duel_rate": MIN_DUEL_RATE,
                     "limit": limit,
                 },
             )

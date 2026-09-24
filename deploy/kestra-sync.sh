@@ -50,6 +50,14 @@ case "${SSH_ORIGINAL_COMMAND:-}" in
     # HTTP, et il n'en existe d'ailleurs aucun pour cette synchronisation.
     exec venv/bin/python scripts/sync_archetypes.py
     ;;
+  mtgtop8)
+    # Les tops des tournois de Duel Commander (MTGTop8), qui remplacent EDHREC
+    # pour conseiller un deck de duel. Incrémental : seuls les événements
+    # inconnus sont demandés, une cinquantaine par semaine. Le premier passage
+    # en compte un millier ; il est plafonné à 300 par exécution et se termine
+    # donc en quatre semaines, ou d'un `--max-events 0` lancé à la main.
+    exec venv/bin/python scripts/sync_mtgtop8.py
+    ;;
   rank-commanders)
     # Classe les commandants possédés par victoire mesurée : des milliers de
     # parties simulées, plusieurs minutes. Ce n'est pas une synchronisation —
@@ -59,7 +67,7 @@ case "${SSH_ORIGINAL_COMMAND:-}" in
     ;;
   *)
     echo "Commande refusée : '${SSH_ORIGINAL_COMMAND:-<vide>}'." >&2
-    echo "Valeurs acceptées : scryfall, french-names, edhrec, archetypes, rank-commanders." >&2
+    echo "Valeurs acceptées : scryfall, french-names, edhrec, archetypes, mtgtop8, rank-commanders." >&2
     exit 2
     ;;
 esac

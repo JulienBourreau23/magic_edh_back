@@ -17,6 +17,7 @@ from fastapi import APIRouter, HTTPException, Query
 
 import db.cards as cards_db
 import db.commanders as commanders_db
+import db.duel_meta as duel_meta
 import db.themes as themes_db
 import services.card_images as card_images
 from services import competitive
@@ -31,6 +32,26 @@ def _check_format(format: str) -> str:
     if format not in FORMATS:
         raise HTTPException(400, f"Format inconnu : {', '.join(FORMATS)}")
     return format
+
+
+def _scores(format: str) -> list[dict]:
+    """
+    Les scores par (commandant, thème). En duel, ceux des tops MTGTop8
+    s'ajoutent à ceux d'EDHREC : les archétypes EDHREC restent la seule source
+    qui nomme des **stratégies**, mais c'est le duel qui dit ce qui gagne en
+    face à face — `competitive._best` le fait passer devant.
+    """
+    scores = themes_db.theme_scores(format)
+    if format == "duel":
+        scores = scores + duel_meta.theme_scores()
+    return scores
+
+
+def _duel_meta_block(format: str) -> dict | None:
+    """Sur quoi reposent les chiffres de duel, pour que l'écran le dise."""
+    if format != "duel" or not duel_meta.available():
+        return None
+    return duel_meta.summary()
 
 
 def _commander(oracle_id: UUID) -> dict:
@@ -79,10 +100,9 @@ def list_commanders(format: str = Query(default="commander", pattern="^(commande
     donnerait un ordre qui ne répond pas à la question, sans rien dire.
     """
     commanders = commanders_db.owned_commanders(format)
-    scores = themes_db.theme_scores(format)
-    enriched = competitive.rank_commanders(commanders, scores, theme)
+    enriched = competitive.rank_commanders(commanders, _scores(format), theme)
     card_images.ensure_images(enriched)
-    return {"commanders": enriched, "theme": theme}
+    return {"commanders": enriched, "theme": theme, "duel_meta": _duel_meta_block(format)}
 
 
 @router.get("/themes")
@@ -98,26 +118,40 @@ def list_themes(commander: UUID, format: str = Query(default="commander")):
     """
     _check_format(format)
     oracle_id = str(commander)
-    themes = themes_db.themes_for(oracle_id)
-    if not themes:
+    themes = [{**theme, "source": "edhrec"} for theme in themes_db.themes_for(oracle_id)]
+    coverage = themes_db.theme_coverage(oracle_id, format)
+
+    # En duel, les références de tournoi viennent **en tête**, avant tout tri
+    # par couverture : ce sont elles qui répondent à la question du format.
+    # Les archétypes EDHREC restent proposés dessous, marqués comme mesurés en
+    # multijoueur — c'est la seule source qui nomme des stratégies.
+    duel_themes = []
+    if format == "duel":
+        identity = _commander(commander)["color_identity"]
+        duel_themes = duel_meta.themes_for(oracle_id, identity)
+        if duel_themes:
+            coverage.update(duel_meta.theme_coverage(oracle_id, identity))
+
+    if not themes and not duel_themes:
         return {"themes": [], "error": "Aucun archétype connu pour ce commandant : lance "
                                        "`python scripts/sync_edhrec.py`."}
 
-    coverage = themes_db.theme_coverage(oracle_id, format)
-    enriched = []
-    for theme in themes:
+    def with_coverage(theme: dict) -> dict:
         stats = coverage.get(theme["slug"], {})
         cards, owned = stats.get("cards", 0), stats.get("owned", 0)
-        enriched.append({
+        return {
             **theme,
             "cards_legal": cards,
             "cards_owned": owned,
             # Part du vivier de l'archétype déjà en collection : le seul
             # chiffre qui dise ce que coûterait de le monter.
             "coverage": round(owned / cards, 3) if cards else 0.0,
-        })
+        }
+
+    enriched = [with_coverage(theme) for theme in themes]
     enriched.sort(key=lambda theme: (-theme["coverage"], -theme["deck_count"]))
-    return {"themes": enriched}
+    return {"themes": [with_coverage(theme) for theme in duel_themes] + enriched,
+            "duel_meta": _duel_meta_block(format)}
 
 
 @router.get("/build")

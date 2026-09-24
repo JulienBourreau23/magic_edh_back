@@ -1,0 +1,59 @@
+# Flow Kestra — le méta du Duel Commander, relevé sur MTGTop8.
+#
+# **Pourquoi une seconde source de listes.** EDHREC ne distingue pas les
+# formats : conseiller un deck de duel avec lui, c'est conseiller ce qui marche
+# à quatre joueurs. MTGTop8 publie les tops des tournois de Duel Commander, et
+# c'est eux qui alimentent désormais le deck compétitif, les cartes à avoir et
+# les suggestions **en duel seulement**.
+#
+# **SSH et non HTTP**, et il n'existe aucun endpoint : une requête par
+# événement et par deck, pause d'une seconde entre chaque. Une semaine
+# ordinaire (~50 événements, ~250 decks) prend six ou sept minutes, et la
+# relecture de la liste une de plus.
+#
+# **Incrémental, contrairement à EDHREC** : un tournoi publié ne change plus,
+# donc seuls les événements inconnus sont demandés. Le premier passage en
+# compte un millier (six mois de fenêtre) ; le script le plafonne à 300 par
+# exécution, et chaque exécution reprend où la précédente s'est arrêtée.
+#
+# Prérequis dans Kestra (Namespace > KV Store) : les mêmes clés SSH que les
+# autres flows (mtg_back_ssh_host, _port, _user, _key).
+#
+# Écrit pour Kestra 1.3.31 OSS et le plugin `fs` 2.11.1.
+id: sync-mtgtop8
+namespace: mtg-edh
+
+description: |
+  Récupère les tops des tournois de Duel Commander publiés sur MTGTop8 depuis
+  la dernière exécution, purge ce qui sort de la fenêtre de six mois et
+  recalcule le méta du duel.
+
+tasks:
+  - id: mtgtop8
+    type: io.kestra.plugin.fs.ssh.Command
+    host: "{{ kv('mtg_back_ssh_host') }}"
+    port: "{{ kv('mtg_back_ssh_port') }}"
+    username: "{{ kv('mtg_back_ssh_user') }}"
+    authMethod: PUBLIC_KEY
+    privateKey: "{{ kv('mtg_back_ssh_key') }}"
+    # Un seul mot : l'aiguillage lu par kestra-sync.sh, pas une commande shell.
+    commands:
+      - mtgtop8
+    # 300 événements plafonnés à ~7 s chacun (mesuré) : quarante minutes au
+    # pire, pendant le rattrapage initial.
+    timeout: PT1H
+    # Pas de retry : un événement qui échoue n'est pas enregistré et sera
+    # redemandé la semaine suivante, sans rien rejouer d'autre.
+
+triggers:
+  # Les tournois du week-end sont publiés en début de semaine. Mardi, après
+  # EDHREC (lundi 4 h) et les combos (lundi 5 h), pour ne pas cumuler.
+  - id: hebdomadaire
+    type: io.kestra.plugin.core.trigger.Schedule
+    cron: "0 4 * * 2"
+
+errors:
+  - id: alerte
+    type: io.kestra.plugin.core.log.Log
+    level: ERROR
+    message: "Échec de la synchronisation MTGTop8 — voir l'exécution {{ execution.id }}"

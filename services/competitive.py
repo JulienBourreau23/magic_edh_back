@@ -29,6 +29,7 @@ Deux choses le sont moins, et c'est assumé :
   jouer ce soir n'est pas un deck.
 """
 import db.commanders as commanders_db
+import db.duel_meta as duel_meta
 import db.themes as themes_db
 from services import combos as combos_service
 from services import mana
@@ -62,6 +63,13 @@ def _type_of(card: dict) -> str | None:
         if card_type in type_line:
             return card_type
     return None
+
+
+# Publics : `services/mtgtop8` calcule le profil des listes de tournoi avec
+# **les mêmes** règles, sans quoi la cible et le deck construit ne compteraient
+# pas les types de la même façon.
+type_of = _type_of
+curve_bucket = _bucket
 
 
 def _rank(card: dict) -> tuple:
@@ -297,15 +305,28 @@ def build(commander: dict, theme_slug: str, format: str, max_price: float) -> di
         return {"error": f"{commander['name']} est banni comme commandant en Duel Commander, "
                          "mais reste jouable dans les 99."}
 
-    themes = {theme["slug"]: theme for theme in themes_db.themes_for(commander_oracle_id)}
+    # Deux sources de référence, choisies par le thème. Les thèmes de duel
+    # (tops MTGTop8) n'ont de sens qu'en duel : un deck multijoueur bâti sur
+    # des listes de face-à-face répondrait à une autre question.
+    duel_theme = theme_slug in duel_meta.SLUGS
+    if duel_theme and format != "duel":
+        return {"error": "Les listes de tournoi de duel ne servent qu'à construire un deck de duel."}
+    if duel_theme:
+        themes = {theme["slug"]: theme
+                  for theme in duel_meta.themes_for(commander_oracle_id, commander["color_identity"])}
+    else:
+        themes = {theme["slug"]: theme for theme in themes_db.themes_for(commander_oracle_id)}
     theme = themes.get(theme_slug)
     if theme is None:
-        return {"error": f"Thème « {theme_slug} » inconnu pour ce commandant : "
-                         "relance la synchronisation EDHREC."}
+        sync = "scripts/sync_mtgtop8.py" if duel_theme else "la synchronisation EDHREC"
+        return {"error": f"Thème « {theme_slug} » inconnu pour ce commandant : relance {sync}."}
 
     type_targets, curve_target, land_slots = _targets(theme)
-    pool = themes_db.build_pool(commander_oracle_id, theme_slug, format,
-                                commander["color_identity"])
+    if duel_theme:
+        pool = duel_meta.build_pool(commander_oracle_id, theme_slug, commander["color_identity"])
+    else:
+        pool = themes_db.build_pool(commander_oracle_id, theme_slug, format,
+                                    commander["color_identity"])
 
     # 99 cartes plus le commandant. Les terrains ont leur propre gabarit : ce
     # qui reste va aux sorts.
@@ -334,10 +355,13 @@ def build(commander: dict, theme_slug: str, format: str, max_price: float) -> di
     # Synergie mesurée **contre l'archétype** et non contre l'ensemble des decks
     # du commandant : ce deck est bâti pour cette stratégie-là, et une carte
     # peut être décisive en infect et inutile en superfriends.
+    # Un thème de duel n'a pas d'équivalent chez EDHREC : la synergie se mesure
+    # alors contre l'ensemble des decks du commandant, seule référence qui
+    # existe. C'est une mesure de multijoueur, et l'écran le dit.
     synergies = commanders_db.synergies_for_deck(
         commander_oracle_id,
         [str(c["oracle_id"]) for c in chosen],
-        theme_slug=theme["slug"],
+        theme_slug=None if duel_theme else theme["slug"],
     )
 
     return {
@@ -346,7 +370,10 @@ def build(commander: dict, theme_slug: str, format: str, max_price: float) -> di
         "commander": _summarize({**commander, "owned_quantity": 1,
                                  "theme_rate": 1.0, "commander_rate": 1.0}),
         "theme": {"slug": theme["slug"], "label": theme["label"],
-                  "deck_count": theme["deck_count"]},
+                  "deck_count": theme["deck_count"],
+                  # D'où viennent les taux : les tops de duel ou EDHREC (multi).
+                  "source": theme.get("source", "edhrec"),
+                  "profile_scope": theme.get("profile_scope")},
         "format": format,
         "cards": [_summarize(card) for card in sorted(chosen, key=_rank)],
         "lands": {
@@ -399,6 +426,7 @@ def _theme_block(row: dict) -> dict:
         # référence molle vaut moins que 93 % d'une référence forte.
         "score": round(float(row["score"] or 0), 3),
         "deck_count": row["deck_count"],
+        "source": row.get("source", "edhrec"),
     }
 
 
@@ -410,10 +438,20 @@ def _by_commander(scores: list[dict]) -> dict[str, dict[str, dict]]:
 
 
 def _best(themes: dict[str, dict]) -> dict | None:
-    """Le mieux servi par la collection, à égalité le plus joué."""
+    """
+    Le mieux servi par la collection, à égalité le plus joué.
+
+    **Les thèmes de duel passent devant ceux d'EDHREC quand ils existent**, et
+    ce n'est pas une préférence : leurs taux ne sont pas sur la même échelle.
+    Un taux d'inclusion EDHREC se mesure sur les decks d'un seul commandant,
+    celui du méta de duel sur tous les decks d'une couleur — le second est
+    mécaniquement plus bas. Les comparer ferait toujours gagner EDHREC, donc
+    toujours conseiller en duel ce qui se joue en multijoueur.
+    """
     if not themes:
         return None
-    return max(themes.values(),
+    rows = [row for row in themes.values() if row.get("source") == duel_meta.SOURCE]
+    return max(rows or themes.values(),
                key=lambda row: (float(row["reachable"] or 0), row["deck_count"] or 0))
 
 
@@ -478,7 +516,9 @@ def archetypes(commanders: list[dict], scores: list[dict]) -> list[dict]:
     owned = {str(commander["oracle_id"]): commander for commander in commanders}
     grouped: dict[str, list[dict]] = {}
     for row in scores:
-        if row["theme_slug"] == themes_db.ALL_THEMES_SLUG:
+        # Ni l'agrégat EDHREC ni les deux références de duel ne sont des
+        # stratégies : leurs slugs commencent tous par `_`.
+        if row["theme_slug"].startswith("_"):
             continue
         if str(row["commander_oracle_id"]) in owned:
             grouped.setdefault(row["theme_slug"], []).append(row)

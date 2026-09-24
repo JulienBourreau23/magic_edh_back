@@ -63,6 +63,7 @@ backend/
 │   ├── themes.py             # archétypes EDHREC d'un commandant et leurs cartes
 │   ├── archetypes.py         # archétypes du format, et ce qu'ils coûteraient
 │   ├── rules.py              # banlists, Game Changers
+│   ├── duel_meta.py          # tops de tournoi de duel : taux, profils, viviers
 │   └── combos.py             # combos à deux cartes présents dans un deck
 ├── routers/
 │   ├── decks.py              # import, CRUD, simulation, suggestions
@@ -98,6 +99,7 @@ backend/
 │   ├── must_have.py          # cartes à avoir, par type
 │   ├── combos.py             # combos présents dans un deck
 │   ├── edhrec.py             # récupération EDHREC (module isolé exprès)
+│   ├── mtgtop8.py            # tops des tournois de Duel Commander (module isolé)
 │   ├── archetype_notes.py    # le principe de chaque archétype, écrit à la main
 │   ├── bracket_rules.py      # le texte des brackets + la démonstration par le moteur
 │   ├── spellbook.py          # import du catalogue Commander Spellbook
@@ -111,10 +113,11 @@ backend/
 │   ├── sync_edhrec.py        # recommandations et archétypes par commandant
 │   ├── sync_archetypes.py    # catalogue des archétypes du format
 │   ├── sync_combos.py        # catalogue Commander Spellbook
+│   ├── sync_mtgtop8.py       # méta du Duel Commander (incrémental)
 │   ├── backfill_categories.py # rejoue la classification sans retélécharger
 │   ├── decklist_from_pdf.py  # planche magic-ville -> decklist
 │   └── hash_password.py      # hash bcrypt pour AUTH_PASSWORD_HASH
-├── kestra/                   # les trois flows d'ordonnancement
+├── kestra/                   # les flows d'ordonnancement
 ├── deploy/                   # unit systemd, INSTALL.md, kestra-sync.sh
 └── tests/                    # `python -m pytest`
 ```
@@ -714,7 +717,7 @@ Kestra vit dans son propre LXC : l'appel HTTP lui évite de dupliquer le dépôt
 un venv et les identifiants Postgres. **L'ordonnanceur reste interchangeable** —
 rien dans le code ne dépend de Kestra, et les scripts CLI font le même travail.
 
-### Les cinq synchronisations, et pourquoi deux mécanismes
+### Les six synchronisations, et pourquoi deux mécanismes
 
 Les flows vivent dans `kestra/` (namespace `mtg-edh`, instance `lxc-kestra`,
 192.168.1.119). **Il n'y a pas de timer systemd** : un seul ordonnanceur, sinon
@@ -726,6 +729,7 @@ le même travail finirait par être lancé deux fois.
 | `sync-edhrec.yml` | recommandations et archétypes par commandant | SSH | lundi 4 h |
 | `sync-archetypes.yml` | catalogue des archétypes du format | SSH | 2 du mois, 3 h |
 | `sync-combos.yml` | catalogue Spellbook | HTTP | lundi 5 h |
+| `sync-mtgtop8.yml` | tops des tournois de Duel Commander | SSH | mardi 4 h |
 
 **Le choix HTTP / SSH suit la durée, pas la préférence**, et ce n'est pas un
 choix figé : EDHREC est passé de HTTP à SSH le jour où la collection a franchi
@@ -743,8 +747,8 @@ semaine des centaines de pages qui n'ont pas bougé.
 `authorized_keys` avec `command="…/deploy/kestra-sync.sh"`, qui force ce script
 quelle que soit la commande demandée ; celle-ci n'arrive que dans
 `$SSH_ORIGINAL_COMMAND` et sert d'aiguillage. Seuls `scryfall`, `french-names`,
-`edhrec`, `archetypes` et `rank-commanders` sont acceptés, tout le reste sort
-en code 2. Ajouter une
+`edhrec`, `archetypes`, `mtgtop8` et `rank-commanders` sont acceptés, tout le
+reste sort en code 2. Ajouter une
 synchronisation par SSH, c'est donc **ajouter un `case` dans ce script**, pas
 seulement une tâche dans le flow.
 
@@ -1090,12 +1094,10 @@ choisit donc la colonne de son format et n'en déduit jamais l'autre. La
 légalité du commandant est vérifiée avant de construire 99 cartes autour de
 lui.
 
-**Conséquence connue et non corrigée** : `IS_COMMANDER_CLAUSE`
-(`db/commanders.py`) et le sync EDHREC filtrent sur `legal_commander` en dur.
-Un commandant légal en duel seulement — Rofellos, Iona, Leovold, Erayo,
-Griselbrand — n'apparaîtrait donc jamais dans les commandants possédés, même
-pour monter un deck de duel. Le rendre correct demanderait de propager le
-format jusqu'à `/deck-ideas`, `/deck-plans` et `/competitive`.
+**Les commandants de duel seulement sont bien vus.** `owned_commanders(format)`
+choisit la colonne de légalité du format, et le sync EDHREC prend les
+commandants légaux dans **l'un ou l'autre** format : Rofellos, Iona, Leovold,
+Erayo et Griselbrand apparaissent en duel et ont leurs recommandations.
 
 Deux choix qui ne sont pas des détails :
 
@@ -1150,6 +1152,139 @@ Une fois le commandant choisi, le deck est construit **directement** avec
 l'archétype de l'étape 2 — le redemander n'apprendrait rien. La liste des
 archétypes du commandant reste affichée dessous pour en changer, et elle montre
 alors ce que ce commandant-là sait faire d'autre.
+
+## Le méta du Duel Commander (MTGTop8)
+
+**EDHREC ne distingue pas les formats**, et c'était un défaut silencieux du duel :
+le deck compétitif, les cartes à avoir et les suggestions d'un deck de duel
+étaient tirés de listes **multijoueur**, simplement filtrées par la banlist du
+duel. Rien n'échouait — les conseils répondaient juste à un autre format :
+ramp lente, effets symétriques et pioche de groupe surévalués, interaction bon
+marché et tempo sous-évalués. Sol Ring en tête des « cartes à avoir » d'un
+format qui le bannit, écarté trop tard pour que l'ordre du reste ait un sens.
+
+MTGTop8 publie les tops des tournois de Duel Commander (format **`EDH`** chez
+eux ; leur `cEDH` est le multi compétitif). Mesuré en septembre 2026 : ~1 000
+tournois sur six mois, ~4,5 decks par tournoi, soit **~4 500 listes**.
+`services/mtgtop8.py` les relève, `db/duel_meta.py` les sert.
+
+**Le duel seulement.** Le multijoueur ne lit jamais ces tables ; en duel, tout
+retombe sur EDHREC tant que le méta n'est pas synchronisé (ou la migration pas
+jouée : `available()` le détecte), et l'écran le dit.
+
+### Ce n'est pas une API
+
+Ce sont les pages HTML du site, lues aux motifs qui les structurent, et
+l'export texte d'un deck (`mtgo?d=`). Pas de `robots.txt` (404) : rien
+d'interdit, rien de prévu non plus. Mêmes règles qu'EDHREC — pause d'une
+seconde, module isolé, tables reconstructibles — et des **parseurs purs testés
+sur des extraits réels** (`tests/test_mtgtop8.py`), pour qu'un changement de
+mise en page casse un test plutôt que de vider le méta au fil des purges. Une
+première page de liste illisible lève une erreur franche pour la même raison.
+
+Trois pièges constatés en écrivant le parseur :
+
+- **La liste ne se pagine qu'avec un « méta »** (`LIST_META_ID = 209`, « Last 6
+  Months ») : sans lui, le site s'arrête à la troisième page, soit trois
+  semaines. La synchro aurait tourné sans erreur sur un méta amputé de 90 %.
+- **Chaque page de liste répète le tableau des « grands événements »** avant
+  la liste paginée. Le lire ferait croire que chaque page commence au 20
+  septembre, et l'arrêt sur la fin de la fenêtre ne se produirait jamais.
+- **Le commandant est rangé sous « Sideboard »** dans l'export, seul (deux
+  lignes pour des partenaires). C'est ce qui permet de l'identifier sans rien
+  deviner. Les cartes partagées y sont écrites « Fire/Ice », converties en
+  « Fire // Ice » pour la résolution.
+
+### Incrémental, contrairement à EDHREC
+
+Un tournoi publié ne change plus : seuls les événements **inconnus** sont
+demandés, et un événement n'est enregistré qu'avec ses decks, dans une seule
+transaction — sans quoi un échec entre les deux le perdrait pour toujours. La
+liste est relue jusqu'au bout de la fenêtre à chaque fois (une cinquantaine de
+pages) plutôt que de s'arrêter au premier connu : une exécution plafonnée
+laisse des trous plus anciens, qu'il faut retrouver la fois suivante.
+
+**Le coût est d'environ 7 s par tournoi** (une page, un export par deck, une
+seconde de pause avant chacun) — mesuré, pas estimé. Une semaine ordinaire
+tient en sept ou huit minutes, relecture de la liste comprise ; le rattrapage
+initial, un millier de tournois, en demande **environ deux heures**, d'où le
+plafond de 300 événements par
+exécution (`DEFAULT_MAX_EVENTS`) : le flow hebdomadaire rattrape en quatre
+semaines, ou un `--max-events 0` lancé à la main le fait d'un coup.
+
+La **fenêtre est glissante** (180 jours, `WINDOW_DAYS`) : les cartes bannies
+ou passées de mode sortent d'elles-mêmes, sans liste à tenir.
+
+### La mesure : un dénominateur par carte
+
+`duel_card_stats` (recalculée à chaque synchro, en Python — `compute_card_stats`
+se teste sans base) porte deux taux, et les confondre fausserait tout :
+
+- **`rate`** : decks qui jouent la carte / decks **qui pouvaient la jouer**
+  (identité du deck ⊇ identité de la carte). Un Contresort joué par tous les
+  decks bleus vaut 100 %, pas 40 % : rapporté à tous les decks, il passerait
+  pour une carte de niche, et les incolores seraient avantagées d'office.
+  Sous 20 decks éligibles (`MIN_ELIGIBLE_DECKS`), le taux compte comme non
+  mesuré — une carte cinq couleurs vue dans un des deux decks cinq couleurs
+  afficherait 50 %.
+- **`share`** : part de **tous** les decks. C'est la popularité brute, celle
+  qui classe les cartes à avoir, toutes couleurs confondues.
+
+**Une table et non une vue matérialisée**, exprès : elle dépendrait de
+`cards_cheapest`, que `rebuild_cheapest_view.sql` supprime (`DROP MATERIALIZED
+VIEW`) — elle disparaîtrait en silence au prochain ajout de colonne sur `cards`.
+
+**Les terrains de base ne sont pas dans `duel_deck_cards`** (ils ne se
+choisissent pas) mais **comptent dans le profil** de chaque deck
+(`type_counts`, `mana_curve`, calculés à l'import avec les règles de
+`competitive.type_of`). Sans eux, un deck à 38 terrains en afficherait 14, et
+le constructeur viserait une manabase absurde. Un test le fige.
+
+### Ce que ça change à l'écran
+
+**`/competitive` en duel** gagne deux références, **en tête** de la liste des
+thèmes, avec la même forme que les thèmes EDHREC (le constructeur n'a rien à
+convertir) :
+
+- **« Ses listes de tournoi »** (`_duel_top8`), quand le commandant a au moins
+  8 tops (`MIN_COMMANDER_DECKS`) : taux et profil mesurés sur ses propres
+  listes, bornés à son identité — une liste Kraum + Yoshimaru joue du blanc
+  que Kraum seul ne peut pas jouer. C'est la meilleure cible possible.
+- **« Méta du duel dans ses couleurs »** (`_duel_meta`), toujours là : ce qui
+  gagne en face à face dans ses couleurs, départagé par l'inclusion EDHREC
+  derrière ce commandant. **Il ne connaît pas le plan du commandant**, et
+  l'écran le dit. Son profil vient des decks de la même identité, ou du
+  format entier sous 20 decks (`profile_scope`).
+
+Les archétypes EDHREC restent proposés dessous, badgés « EDHREC · multi » : ce
+sont les seuls à nommer des **stratégies** (l'étape 2 en dépend). Mais
+**`competitive._best` fait passer les références de duel devant**, et ce n'est
+pas une préférence : les deux échelles ne se comparent pas. Un taux EDHREC se
+mesure sur les decks d'un seul commandant, celui du méta sur tous les decks
+d'une couleur — mécaniquement plus bas. Comparer les poids ferait toujours
+gagner EDHREC, donc toujours conseiller en duel ce qui se joue en multi. Pour
+la même raison, l'indice « monte mieux X » ne compare que deux thèmes de même
+source. Un test fige la règle.
+
+Les **synergies** d'un deck bâti sur une référence de duel restent celles
+d'EDHREC, tous decks du commandant confondus : c'est la seule source qui les
+mesure, et l'encadré ne prétend plus qu'elles portent sur l'archétype.
+
+**`/must-have` en duel** est classé par `share` (« 52 % des tops ») au lieu
+d'`edhrec_rank`. Même réponse, mêmes huit types : seule la mesure qui ordonne
+change. Sur le premier échantillon : Solitude, Swords to Plowshares, Lightning
+Bolt, Mental Misstep, Skullclamp — là où EDHREC mettait Sol Ring en tête.
+
+**Les suggestions et l'équilibrage d'un deck de duel** passent par
+`find_candidates`, le point d'entrée unique : le plancher de qualité
+« rang EDHREC ≤ 2000 » y devient « vue dans au moins 5 tops **et** 2 % des
+decks éligibles » (`MIN_DUEL_DECKS`, `MIN_DUEL_RATE`). Deux conditions parce
+qu'aucune ne suffit : un compte absolu devient laxiste quand le méta grossit,
+un taux seul se laisse berner par un petit dénominateur.
+
+**Ce qui ne change pas** : `/deck-ideas`, `/deck-plans` et `/build` restent sur
+EDHREC. Ils montent des decks pour jouer entre amis, sans choix de format de
+tournoi ; les brancher sur le duel serait une autre question.
 
 ## Le catalogue des archétypes (`/archetypes`)
 
@@ -1277,7 +1412,9 @@ plafond ». Cette intention décide de tout le reste :
 
 Le classement est `edhrec_rank`, qui arrive avec `sync_scryfall`. **Il n'y a
 donc aucune table à entretenir et aucun flow Kestra propre à cette page** : la
-liste se met à jour toute seule au rythme mensuel du flow `sync-scryfall`. Il
+liste se met à jour toute seule au rythme mensuel du flow `sync-scryfall`.
+**Sauf en duel**, classé sur les tops de tournoi — voir « Le méta du Duel
+Commander ». Il
 n'en faudrait un que pour changer de source — les pages *top cards* d'EDHREC,
 qui classent par taux d'inclusion réel plutôt que par popularité globale.
 
@@ -1811,10 +1948,14 @@ Deux points d'exploitation :
 
 **Déployé et planifié.** DB (`lxc-pg18`, 192.168.1.104), back (`lxc-mtg-back`,
 192.168.1.143) et front (`lxc-mtg-front`, 192.168.1.144), exposés en
-`mtg-edh-api.julien-cloud.eu` et `mtg-edh.julien-cloud.eu`. Les cinq
+`mtg-edh-api.julien-cloud.eu` et `mtg-edh.julien-cloud.eu`. Les
 synchronisations sont ordonnancées par Kestra (`lxc-kestra`, 192.168.1.119).
 
-Rien n'est en chantier. Deux pistes ouvertes, aucune engagée :
+Le méta du duel (MTGTop8) est codé et testé, **pas encore déployé** : migration
+022, puis un premier `sync_mtgtop8.py --max-events 0` (quelques heures), puis
+le flow `sync-mtgtop8.yml` à importer dans Kestra — voir `deploy/INSTALL.md`.
+
+Deux pistes ouvertes, aucune engagée :
 
 - **Narration de partie par Ollama** (LXC IA, même hôte que pour
   `sw-coaching`). Le principe directeur tient : une IA ne commenterait que des

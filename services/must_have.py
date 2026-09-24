@@ -29,7 +29,15 @@ Le classement est `edhrec_rank`, c'est-à-dire la popularité mesurée par EDHRE
 qui arrive avec `sync_scryfall`. **Aucune table à entretenir, donc aucun flow
 d'ordonnancement propre à cette page** : la liste se met à jour toute seule au
 rythme mensuel du flow `sync-scryfall`.
+
+**Sauf en duel**, où ce rang dit ce qui se joue… en multijoueur : Sol Ring en
+tête des artefacts d'un format qui le bannit, filtré trop tard pour que le
+reste du classement ait un sens. Dès que le méta MTGTop8 est synchronisé, le
+duel est classé par **part des tops de tournoi de duel qui jouent la carte**
+(`db.duel_meta.top_cards`) ; sans lui, il retombe sur `edhrec_rank` et la
+réponse le dit (`source`).
 """
+import db.duel_meta as duel_meta
 from db.core import get_conn
 
 DEFAULT_MAX_PRICE_EUR = 50.0
@@ -102,6 +110,9 @@ def must_have(
     """
     legality = _legality_column(format)
 
+    if format == "duel" and duel_meta.available():
+        return _duel_must_have(max_price)
+
     if max_price is None:
         condition = ""
     else:
@@ -165,6 +176,34 @@ def must_have(
         "format": format,
         "max_price_eur": max_price,
         "groups": groups,
+        "source": "edhrec",
+    }
+
+
+def _duel_must_have(max_price: float | None) -> dict:
+    """
+    La même réponse, classée sur les tops de duel. Les huit types et leurs
+    tailles ne changent pas : seule la mesure qui ordonne change, pour que la
+    page et la vue d'ensemble n'aient rien de neuf à comprendre.
+    """
+    groups = []
+    for type_def in TYPES:
+        cards, over_budget = duel_meta.top_cards(type_def["match"], type_def["top"], max_price)
+        groups.append({
+            "key": type_def["key"],
+            "label": type_def["label"],
+            "top": type_def["top"],
+            "cards": cards,
+            "owned_count": sum(1 for c in cards if c["owned"] > 0),
+            "to_buy_count": sum(1 for c in cards if c["owned"] == 0),
+            "over_budget": over_budget,
+        })
+    return {
+        "format": "duel",
+        "max_price_eur": max_price,
+        "groups": groups,
+        "source": "mtgtop8",
+        "duel_meta": duel_meta.summary(),
     }
 
 
@@ -262,4 +301,7 @@ def coverage(format: str = "commander") -> dict:
         "stats": collection_db.stats(),
         "groups": groups,
         "rank_distribution": rank_distribution(),
+        # D'où vient le classement : en duel il suit les tops MTGTop8, et la
+        # page doit le dire plutôt que de parler de « popularité EDHREC ».
+        "source": lists["source"],
     }

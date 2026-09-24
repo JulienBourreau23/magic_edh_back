@@ -54,6 +54,21 @@ psql -h 192.168.1.104 -U julien -d magic_edh -f scripts/migration_016_combo_desc
 venv/bin/python scripts/sync_combos.py            # idem : les étapes des combos
 ```
 
+Le méta du Duel Commander (MTGTop8, migration 022) — quatre tables neuves,
+rien à reconstruire côté `cards` :
+
+```bash
+psql -h 192.168.1.104 -U julien -d magic_edh -f scripts/migration_022_duel_meta.sql
+# Premier passage : ~1 000 tournois à ~7 s chacun, soit environ deux heures.
+# Dans un tmux, ou laisser le flow hebdomadaire rattraper par tranches de 300.
+venv/bin/python scripts/sync_mtgtop8.py --max-events 0
+```
+
+Tant que la table est vide, le duel retombe sur EDHREC et l'écran le signale :
+déployer le code avant la migration ne casse rien. Puis importer
+`kestra/sync-mtgtop8.yml` dans le namespace `mtg-edh` : le `case mtgtop8` de
+`kestra-sync.sh` est déjà là.
+
 `migration_011` crée `normalize_card_name()`, dont dépend la résolution des
 noms : **six tests échouent en `skip` tant qu'elle n'est pas jouée**, et les
 decklists françaises accentuées repartent au repli flou. Elle ne touche aucune
