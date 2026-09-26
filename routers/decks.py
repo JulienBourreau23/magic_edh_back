@@ -8,7 +8,7 @@ import db.decks as decks_db
 import db.commanders as commanders_db
 import db.ignored as ignored_db
 import services.card_images as card_images
-from services import combos, deck_analysis, simulation, suggestions
+from services import combos, deck_analysis, simulation, suggestions, upcoming
 from services.decklist_parser import import_decklist
 
 router = APIRouter(prefix="/decks", tags=["decks"])
@@ -83,7 +83,10 @@ def get_deck(deck_id: int):
         "import_issues": decks_db.get_import_issues(deck_id),
         "mana_curve": deck_analysis.mana_curve(cards),
         "total_price_eur": deck_analysis.total_price_eur(cards),
-        "legality_warnings": deck_analysis.legality_warnings(cards, deck["format"]),
+        "legality_warnings": deck_analysis.legality_warnings(
+            cards, deck["format"],
+            upcoming.release_dates_for(cards, deck["format"]), upcoming.today_paris(),
+        ),
         "bracket": deck_analysis.bracket_estimate(cards, combos.find_in_deck(cards)),
         # Ce qu'EDHREC voit particulièrement associé à ce commandant, parmi les
         # cartes du deck. Vide si le commandant n'a pas de données : il n'est

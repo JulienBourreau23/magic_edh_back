@@ -21,7 +21,7 @@ import db.cards as cards_db
 import db.commanders as commanders_db
 import db.decks as decks_db
 from services import combos as combos_service
-from services import deck_analysis, deck_plans
+from services import deck_analysis, deck_plans, upcoming
 
 # 36 terrains pour 99 cartes : le repère du format, celui que la page « Monter
 # 4 decks » applique déjà. L'atelier laisse le régler, c'est un repère et non
@@ -60,7 +60,9 @@ def evaluate(cards: list[dict], format: str) -> dict:
         },
         "mana_curve": deck_analysis.mana_curve(cards),
         "total_price_eur": deck_analysis.total_price_eur(cards),
-        "legality_warnings": deck_analysis.legality_warnings(cards, format),
+        "legality_warnings": deck_analysis.legality_warnings(
+            cards, format, upcoming.release_dates_for(cards, format), upcoming.today_paris(),
+        ),
         "bracket": deck_analysis.bracket_estimate(cards, combos_service.find_in_deck(cards)),
         "manabase": deck_analysis.manabase(cards, deep=True),
         "role_diagnostics": deck_analysis.role_diagnostics(cards),

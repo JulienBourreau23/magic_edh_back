@@ -14,6 +14,7 @@ DECK_CARD_COLUMNS = """
     c.color_identity, c.rarity, c.price_eur, c.image_uri, c.image_downloaded,
     c.legal_commander, c.legal_duel, c.game_changer, c.categories,
     c.produced_mana, c.edhrec_rank, fr.printed_name AS name_fr,
+    c.set_code, c.banned_commander, c.banned_duel,
     (c.oracle_text ILIKE '%%deck can have any number of cards named%%') AS allows_multiple
 """
 

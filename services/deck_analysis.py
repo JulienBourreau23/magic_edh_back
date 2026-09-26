@@ -2,6 +2,8 @@
 services/deck_analysis.py — analyse statique d'un deck : courbe, prix, légalité,
 manabase et estimation de bracket. Tout est calculé, rien n'est estimé par une IA.
 """
+from datetime import date
+
 from services import card_categories as categories, simulation
 from services.mana import (BASIC_LAND_BY_COLOR, COLORS, color_requirements,
                            miss_probability, parse_mana_cost, sources_needed)
@@ -346,12 +348,44 @@ def role_diagnostics(cards: list[dict]) -> list[dict]:
     return diagnostics
 
 
-def legality_warnings(cards: list[dict], format: str = "commander") -> list[dict]:
+# Le sync Scryfall est mensuel : une extension sortie depuis moins longtemps
+# peut encore porter en base la légalité « pas encore sortie ».
+RECENT_RELEASE_DAYS = 45
+
+
+def _illegal_issue(card: dict, label: str, banned_field: str,
+                   release_dates: dict[str, date], today: date | None) -> str:
+    """
+    Pourquoi une carte n'est pas légale. Avant sa sortie, Scryfall marque une
+    nouveauté « not legal » comme une carte d'Un-set : sans la date de son
+    extension, on annoncerait interdite une carte qui sera jouable dans six jours.
+    """
+    released = release_dates.get(card.get("set_code") or "")
+    if card.get(banned_field) or released is None or today is None:
+        return f"non légale en {label} (bannie ou hors format)"
+    when = f"{released.day} {FRENCH_MONTHS[released.month - 1]} {released.year}"
+    if released > today:
+        return f"pas encore sortie : utilisable à partir du {when}"
+    if (today - released).days <= RECENT_RELEASE_DAYS:
+        return f"sortie le {when} : légalité confirmée au prochain sync Scryfall"
+    return f"non légale en {label} (bannie ou hors format)"
+
+
+FRENCH_MONTHS = ("janvier", "février", "mars", "avril", "mai", "juin", "juillet",
+                 "août", "septembre", "octobre", "novembre", "décembre")
+
+
+def legality_warnings(cards: list[dict], format: str = "commander",
+                      release_dates: dict[str, date] | None = None,
+                      today: date | None = None) -> list[dict]:
     """
     Règles dures du format : taille, singleton, banlist, identité de couleur.
     L'identité de couleur est la contrainte structurante en EDH — une carte
     hors identité est injouable, pas simplement déconseillée. Le Duel Commander
     a sa propre banlist (Sol Ring y est banni), d'où le paramètre `format`.
+
+    `release_dates` ({set_code: date}) distingue une carte pas encore sortie
+    d'une carte hors format ; sans elles, l'ancien message reste.
     """
     warnings: list[dict] = []
     legality_field = "legal_duel" if format == "duel" else "legal_commander"
@@ -370,10 +404,13 @@ def legality_warnings(cards: list[dict], format: str = "commander") -> list[dict
             "issue": "commandant non déterminé : l'identité de couleur n'a pas pu être vérifiée",
         })
 
+    label = "Duel Commander" if format == "duel" else "Commander"
+    banned_field = "banned_duel" if format == "duel" else "banned_commander"
+    release_dates = release_dates or {}
     for card in cards:
         if not card[legality_field]:
-            label = "Duel Commander" if format == "duel" else "Commander"
-            warnings.append({"card": display_name(card), "issue": f"non légale en {label} (bannie ou hors format)"})
+            warnings.append({"card": display_name(card),
+                             "issue": _illegal_issue(card, label, banned_field, release_dates, today)})
 
         is_basic_land = card["type_line"] and card["type_line"].startswith("Basic Land")
         if card["quantity"] > 1 and not (is_basic_land or card.get("allows_multiple")) and not card["is_commander"]:

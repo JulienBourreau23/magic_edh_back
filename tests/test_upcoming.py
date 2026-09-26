@@ -36,3 +36,46 @@ def test_le_jour_de_sortie_la_page_passe_a_la_suivante():
 
 def test_rien_a_venir():
     assert next_release(SETS, date(2027, 1, 1)) is None
+
+
+# --- L'alerte de légalité d'une carte pas encore sortie --------------------
+
+from services.deck_analysis import legality_warnings  # noqa: E402
+
+RELEASES = {"fra": date(2026, 10, 2), "lea": date(1993, 8, 5)}
+
+
+def _card(**overrides):
+    card = {"name": "X", "name_fr": None, "quantity": 1, "is_commander": False,
+            "type_line": "Instant", "color_identity": [], "legal_commander": False,
+            "legal_duel": False, "banned_commander": False, "banned_duel": False,
+            "set_code": "fra"}
+    return {**card, **overrides}
+
+
+def _issue(card, today, format="commander"):
+    warnings = legality_warnings([card], format, RELEASES, today)
+    return next(w["issue"] for w in warnings if w["card"] == "X")
+
+
+def test_une_nouveaute_n_est_pas_annoncee_interdite():
+    assert _issue(_card(), date(2026, 9, 26)) == "pas encore sortie : utilisable à partir du 2 octobre 2026"
+
+
+def test_sortie_recente_non_synchronisee():
+    assert "prochain sync Scryfall" in _issue(_card(), date(2026, 10, 10))
+
+
+def test_une_carte_bannie_reste_bannie_meme_nouvelle():
+    assert "bannie" in _issue(_card(banned_commander=True), date(2026, 9, 26))
+    # Le drapeau de l'autre format ne compte pas.
+    assert "pas encore sortie" in _issue(_card(banned_duel=True), date(2026, 9, 26))
+
+
+def test_vieille_carte_hors_format_garde_l_ancien_message():
+    assert "hors format" in _issue(_card(set_code="lea"), date(2026, 9, 26))
+
+
+def test_sans_dates_l_ancien_message():
+    warnings = legality_warnings([_card()], "commander")
+    assert any("hors format" in w["issue"] for w in warnings)

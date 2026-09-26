@@ -83,3 +83,20 @@ def fetch_sets() -> list[dict]:
     with _lock:
         _cache.update(at=time.monotonic(), sets=sets)
     return sets
+
+
+def release_dates_for(cards: list[dict], format: str) -> dict[str, date]:
+    """
+    {set_code: date de sortie}, demandé à Scryfall **seulement** si une carte
+    du deck est hors format : c'est le seul cas où la date change le message.
+    Scryfall injoignable ne doit pas faire tomber une fiche de deck : on rend
+    alors un dictionnaire vide, et l'alerte garde son ancien libellé.
+    """
+    field = "legal_duel" if format == "duel" else "legal_commander"
+    if all(card[field] for card in cards):
+        return {}
+    try:
+        sets = fetch_sets()
+    except httpx.HTTPError:
+        return {}
+    return {s["code"]: date.fromisoformat(s["released_at"]) for s in sets if s.get("released_at")}
