@@ -15,7 +15,7 @@ from auth import require_auth
 from routers import (admin, archetypes, auth, balance, budget_lands, build, cards,
                      collection, competitive, deck_ideas, rules,
                      deck_plans, decks, matchup, must_have, performance, videos,
-                     wishlist)
+                     upcoming, wishlist)
 
 
 @asynccontextmanager
@@ -64,6 +64,7 @@ app.include_router(competitive.router, dependencies=protected)
 app.include_router(archetypes.router, dependencies=protected)
 app.include_router(rules.router, dependencies=protected)
 app.include_router(wishlist.router, dependencies=protected)
+app.include_router(upcoming.router, dependencies=protected)
 app.include_router(must_have.router, dependencies=protected)
 app.include_router(build.router, dependencies=protected)
 app.include_router(budget_lands.router, dependencies=protected)
