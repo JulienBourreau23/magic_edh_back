@@ -15,7 +15,22 @@ DECK_CARD_COLUMNS = """
     c.legal_commander, c.legal_duel, c.game_changer, c.categories,
     c.produced_mana, c.edhrec_rank, fr.printed_name AS name_fr,
     c.set_code, c.banned_commander, c.banned_duel,
-    (c.oracle_text ILIKE '%%deck can have any number of cards named%%') AS allows_multiple
+    (c.oracle_text ILIKE '%%deck can have any number of cards named%%') AS allows_multiple,
+    -- Ce qu'un fetchland peut aller chercher. Scryfall ne lui déclare aucun
+    -- mana produit : sans cette colonne, il compte pour un terrain muet dans
+    -- la manabase, la simulation et le duel. Ses couleurs dépendent des cibles
+    -- présentes dans le deck, d'où une résolution en Python
+    -- (`mana.resolve_fetchlands`) plutôt qu'une valeur figée ici.
+    CASE WHEN c.type_line LIKE '%%Land%%' AND c.oracle_text ~* 'search your library for' THEN
+        array_remove(ARRAY[
+            CASE WHEN c.oracle_text ~* 'search your library for [^.]*\\mplains\\M' THEN 'Plains' END,
+            CASE WHEN c.oracle_text ~* 'search your library for [^.]*\\misland\\M' THEN 'Island' END,
+            CASE WHEN c.oracle_text ~* 'search your library for [^.]*\\mswamp\\M' THEN 'Swamp' END,
+            CASE WHEN c.oracle_text ~* 'search your library for [^.]*\\mmountain\\M' THEN 'Mountain' END,
+            CASE WHEN c.oracle_text ~* 'search your library for [^.]*\\mforest\\M' THEN 'Forest' END,
+            CASE WHEN c.oracle_text ~* 'search your library for [^.]*basic land card' THEN 'Basic' END
+        ], NULL)
+    END AS fetches
 """
 
 # Le nom français vient d'une table d'alias séparée (~88 % de couverture) :

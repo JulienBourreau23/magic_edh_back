@@ -142,3 +142,47 @@ def sources_needed(pips: int, turn: int,
         if _at_least(sources, deck_size, seen, pips) >= confidence:
             return sources
     return deck_size
+
+
+LAND_TYPES = frozenset({"Plains", "Island", "Swamp", "Mountain", "Forest"})
+
+
+def _land_types(card: dict) -> set[str]:
+    type_line = card.get("type_line") or ""
+    return set(type_line.split("—", 1)[1].split()) & LAND_TYPES if "—" in type_line else set()
+
+
+def resolve_fetchlands(cards: list[dict]) -> list[dict]:
+    """
+    Donne à chaque fetchland les couleurs des terrains qu'il peut aller
+    chercher **dans ce deck**.
+
+    Scryfall ne déclare aucun mana produit pour un fetchland : il comptait donc
+    comme un terrain muet partout — manabase, simulation, duel — et un deck qui
+    en joue six paraissait plus lent et plus mal réparti qu'il ne l'est. La
+    couleur dépend des cibles présentes : Polluted Delta vaut du blanc dans un
+    deck qui joue Hallowed Fountain (type Île), et rien du tout dans un deck
+    sans Île ni Marais.
+
+    Seuls les terrains qui ne produisent aucune couleur par eux-mêmes sont
+    résolus : Flagstones of Trokair produit déjà du blanc et ne cherche une
+    Plaine qu'une fois détruit. Idempotent : résoudre deux fois ne change rien.
+    """
+    lands = [card for card in cards if "Land" in (card.get("type_line") or "")]
+    resolved = []
+    for card in cards:
+        fetches = set(card.get("fetches") or [])
+        produced = set(card.get("produced_mana") or [])
+        if not fetches or produced & COLORS:
+            resolved.append(card)
+            continue
+        colors = set(produced)
+        for target in lands:
+            if target is card or target.get("fetches"):
+                continue
+            by_type = _land_types(target) & fetches
+            is_basic = (target.get("type_line") or "").startswith("Basic Land")
+            if by_type or ("Basic" in fetches and is_basic):
+                colors |= set(target.get("produced_mana") or [])
+        resolved.append({**card, "produced_mana": sorted(colors, key="WUBRGC".index)})
+    return resolved

@@ -6,7 +6,8 @@ from datetime import date
 
 from services import card_categories as categories, simulation
 from services.mana import (BASIC_LAND_BY_COLOR, COLORS, color_requirements,
-                           miss_probability, parse_mana_cost, sources_needed)
+                           miss_probability, parse_mana_cost, resolve_fetchlands,
+                           sources_needed)
 
 COMMANDER_DECK_SIZE = 100
 RECOMMENDED_LANDS = range(35, 39)
@@ -154,6 +155,7 @@ def manabase(cards: list[dict], deep: bool = False) -> dict:
     rouges pour 11 symboles. La cible vient de `mana.sources_needed`, donc d'un
     calcul, et les cartes que la manabase ne soutient pas sont nommées.
     """
+    cards = resolve_fetchlands(cards)
     land_count = sum(c["quantity"] for c in cards if categories.is_land(c))
     nonland = [c for c in cards if not categories.is_land(c)]
 

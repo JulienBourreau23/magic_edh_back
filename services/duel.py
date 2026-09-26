@@ -43,7 +43,7 @@ import re
 from dataclasses import dataclass, field
 
 from services.card_categories import BOARD_WIPE, COUNTERSPELL, DRAW, LAND, RAMP, REMOVAL
-from services.mana import can_pay, parse_mana_cost
+from services.mana import can_pay, parse_mana_cost, resolve_fetchlands
 from services.simulation import SimCard, draw_opening_hand, mana_amount, sources_in_play
 
 COMMANDER_LIFE = 40
@@ -295,7 +295,7 @@ def build_player(name: str, cards: list[dict], rng: random.Random, life: int,
                  winning_combos: list[tuple[frozenset[str], int]] | None = None) -> Player:
     library: list[DuelCard] = []
     commander: DuelCard | None = None
-    for card in cards:
+    for card in resolve_fetchlands(cards):
         duel_card = to_duel_card(card)
         if card.get("is_commander"):
             commander = commander or duel_card

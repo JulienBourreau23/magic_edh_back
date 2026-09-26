@@ -20,7 +20,7 @@ import re
 from dataclasses import dataclass
 
 from services.card_categories import LAND, RAMP
-from services.mana import can_pay, parse_mana_cost
+from services.mana import can_pay, parse_mana_cost, resolve_fetchlands
 
 DEFAULT_ITERATIONS = 1000
 HORIZON_TURNS = 10
@@ -68,6 +68,7 @@ def to_sim_card(card: dict) -> SimCard:
 
 def build_library(cards: list[dict]) -> tuple[list[SimCard], SimCard | None]:
     """Développe le deck en une liste de cartes (hors commandant)."""
+    cards = resolve_fetchlands(cards)
     library: list[SimCard] = []
     commander: SimCard | None = None
     for card in cards:
